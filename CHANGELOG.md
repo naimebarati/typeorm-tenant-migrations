@@ -10,3 +10,4 @@ First alpha. Not production-hardened; see "Known limitations" in the README.
 * Read-only `plan`/`status` (PostgreSQL-enforced read-only connections).
 * Bounded concurrency (default 1), transaction modes `each` (default) / `all` / `none`, fail-fast or `continueOnError`.
 * JSON reports, documented exit codes, secret redaction.
+* `dataSource: null` now fails with `INVALID_CONFIGURATION` instead of a raw `TypeError`; the CLI logger honors the `io.stderr` stream it is given.

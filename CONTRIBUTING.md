@@ -17,6 +17,7 @@ The role in `TTM_TEST_PG_URL` must be a superuser (tests create and drop databas
 npm run lint
 npm run typecheck
 npm test                      # builds dist/ first (CLI tests run the built binary)
+npm run coverage              # same suite + coverage gate (see vitest.config.mts)
 scripts/test-matrix.sh [versions...]   # default: 0.3.20 0.3.31 1.0.0 1.1.2
 scripts/verify-tarball.sh [typeorm-range]
 npm pack --dry-run
@@ -29,3 +30,5 @@ npm pack --dry-run
 * Public TypeORM API only. If a change needs `MigrationExecutor` or another internal, write down why, and what the alternatives were, in `docs/architecture.md`.
 * Don't claim support for something that has no test. The README's compatibility table is filled from runs only.
 * New defaults must be at least as conservative as the old ones.
+
+* Coverage thresholds only go up. If a change lowers coverage, add the test; don't lower the threshold.

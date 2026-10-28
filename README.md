@@ -142,7 +142,7 @@ typeorm-tenant-migrations <plan|status|run> --config <file> (--all | --tenant <i
 
 CLI flags override `options` from the config file. Relative migration globs are resolved by TypeORM against the **current working directory**; use absolute paths (as the examples do) to be independent of where you start the process.
 
-Config files in TypeScript need `tsx` (`npm i -D tsx`). Without it you get an error telling you so. The TS path is covered by a test using tsx 4.x on Node 22.
+TypeScript configs: if [`tsx`](https://tsx.is) is resolvable from the working directory it is used (tested with tsx 4.x). Without it, Node's built-in type stripping loads configs that use only erasable type syntax (Node 22.18+ / 24+; verified on Node 22.22), while anything else (`enum`, decorators, older Node) fails with `INVALID_CONFIGURATION` telling you to install `tsx` or point `--config` at compiled `.js`. Both outcomes are tested in a real Node process.
 
 ### Exit codes
 
@@ -230,7 +230,7 @@ None of these make a *batch across tenants* atomic: PostgreSQL cannot commit one
 
 Default `'tenant-only'`: `search_path` is exactly the tenant schema. An unqualified name that isn't in that schema **fails** (relation does not exist) instead of quietly resolving in `public`. A migration touching a shared table must qualify it: `"shared"."plans"`.
 
-`searchPathMode: 'tenant-first', fallbackSchemas: ['public']` is available when you need it, but understand the risk: a tenant table that is missing (or misspelled) silently resolves to a same-named table in the fallback schema, and the DDL/DML lands there. Prefer qualifying names explicitly.
+`searchPathMode: 'tenant-first', fallbackSchemas: ['public']` is available when you need it, but understand the risk: a tenant table that is missing (or misspelled) silently resolves to a same-named table in the fallback schema, and the DDL/DML lands there. This is not hypothetical: a test runs `ALTER TABLE "orders"` against a tenant that has no `orders` table and shows it altering `public.orders` under `tenant-first`, while the default `tenant-only` fails with `relation "orders" does not exist`. Prefer qualifying names explicitly.
 
 If you set `extra.options` on your DataSource, the runner appends its own `-c search_path=…` to it. A `search_path` already present in `extra.options`, in a `url` / `extra.connectionString` `options=` parameter, or an `options` parameter in the URL is a configuration **error**, not something to merge. Tenant schema names must match `^[a-z_][a-z0-9_]*$` (max 63 chars); `public`, `information_schema`, `pg_*` are never accepted as a tenant schema.
 
@@ -284,16 +284,16 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
-### Local runs with exact versions (198 tests each)
+### Local runs with exact versions (255 tests each)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 198 / 198 pass |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
+| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 255 / 255 pass |
+| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 255 / 255 pass |
 
 `pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18, Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
 
@@ -307,6 +307,8 @@ npm test                      # builds, then unit + integration (+ CLI against t
 scripts/test-matrix.sh        # the TypeORM version matrix, one after another
 scripts/verify-tarball.sh     # pack, install into a clean dir, run the README flow
 ```
+
+`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 98.1 / 96.2 / 95.0 / 99.1). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary.
 
 Every integration file creates (and drops) its own database. More in [CONTRIBUTING.md](CONTRIBUTING.md). Architecture notes: [`docs/architecture.md`](docs/architecture.md).
 

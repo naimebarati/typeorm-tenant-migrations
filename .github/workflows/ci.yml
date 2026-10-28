@@ -69,7 +69,12 @@ jobs:
           npm install --no-save --no-audit --no-fund "pg@${{ matrix.pg }}"
           grep -m1 '"version"' node_modules/typeorm/package.json node_modules/pg/package.json
       - run: npm run typecheck
-      - run: npm test
+      - name: Tests
+        if: ${{ !(matrix.typeorm == '1' && matrix.postgres == '18' && matrix.node == 22 && matrix.pg == '8') }}
+        run: npm test
+      - name: Tests with coverage gate
+        if: ${{ matrix.typeorm == '1' && matrix.postgres == '18' && matrix.node == 22 && matrix.pg == '8' }}
+        run: npm run coverage
 
   tarball:
     name: install from tarball and run the README flow
