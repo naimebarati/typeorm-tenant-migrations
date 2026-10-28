@@ -2,7 +2,7 @@
 
 Run your normal **TypeORM migrations** across a PostgreSQL database that uses **one schema per tenant** — one tenant, a few, or all of them — with the guard rails a multi-tenant deploy needs.
 
-> **Status: `0.1.0-alpha.1`.** The behavior described below is covered by automated tests that were run against real PostgreSQL (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
+> **Status: `0.1.0-alpha.1`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 16 and 18 (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
 
 ## The problem
 
@@ -266,22 +266,36 @@ Common causes: `SCHEMA_NOT_FOUND` (create the schema), `SCHEMA_CONTEXT_MISMATCH`
 
 ## Compatibility
 
-Everything below was **actually run**; nothing is inferred. "Tests" is the full suite (unit + integration + CLI against a real database): 198 tests.
+Everything below was **actually run**; nothing is inferred. The suite is unit + integration + CLI tests against a real database.
+
+### GitHub Actions (commit `b519d16`, run #2: all 12 jobs green)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 *(oldest supported)* | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 0.3.31 *(latest 0.3.x)* | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
+| 0.3.20 *(oldest supported)* | latest 8.x | 16 | 22 | pass |
+| 0.3.20 | latest 8.x | 18 | 22 | pass |
+| latest 0.3.x | latest 8.x | 16 | 22 | pass |
+| latest 0.3.x | latest 8.x | 18 | 22 | pass |
+| latest 0.3.x | 8.5.1 *(oldest supported)* | 16 | 22 | pass |
+| latest 1.x | latest 8.x | 16 | 22 | pass |
+| latest 1.x | latest 8.x | 18 | 22 | pass |
+| latest 1.x | latest 8.x | 16 | 20 | pass |
+| latest 1.x | latest 8.x | 16 | 24 | pass |
+
+"latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
+
+### Local runs with exact versions (198 tests each)
+
+| TypeORM | pg | PostgreSQL | Node | Result |
+| --- | --- | --- | --- | --- |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
 | 1.0.0 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 1.1.2 *(latest 1.x)* | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
-| 0.3.31 | 8.5.1 *(oldest supported)* | 16.15 | 22.22 | 198 / 198 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 198 / 198 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 198 / 198 pass |
 | 0.3.31 | 8.11.5 | 16.15 | 22.22 | 198 / 198 pass |
 
-`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run.
-
-**PostgreSQL 18 and other Node versions:** the CI workflow in this repo defines a PostgreSQL 16/18 × TypeORM matrix, but it had not been executed by GitHub Actions when this table was written, so those cells are intentionally empty here. Update this table from green CI runs.
-
-The installed-from-tarball flow (`scripts/verify-tarball.sh`: pack → install into a clean directory → CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) was run with TypeORM 1.1.2 and 0.3.31.
+`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18, Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
 
 ## Contributing
 
