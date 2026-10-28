@@ -1,0 +1,14 @@
+{
+  "name": "typeorm-tenant-migrations-example-basic",
+  "private": true,
+  "scripts": {
+    "plan": "typeorm-tenant-migrations plan --config ./tenant-migrations.config.cjs --all",
+    "status": "typeorm-tenant-migrations status --config ./tenant-migrations.config.cjs --all",
+    "migrate": "typeorm-tenant-migrations run --config ./tenant-migrations.config.cjs --all"
+  },
+  "dependencies": {
+    "pg": "^8.5.1",
+    "typeorm": "^0.3.20 || ^1.0.0",
+    "typeorm-tenant-migrations": "^0.1.0-alpha.1"
+  }
+}
