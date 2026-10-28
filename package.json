@@ -53,6 +53,7 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
     "prepack": "npm run build"
@@ -60,6 +61,7 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.13.0",
     "pg": "^8.23.1",
     "tsx": "^4.23.15",
