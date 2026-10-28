@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: lint, typecheck, build, pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Tarball contents
+        run: npm pack --dry-run
+
+  test:
+    name: tests (typeorm ${{ matrix.typeorm }}, postgres ${{ matrix.postgres }}, node ${{ matrix.node }}${{ matrix.pg && format(', pg {0}', matrix.pg) || '' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22]
+        postgres: ['16', '18']
+        typeorm: ['0.3.20', '0.3', '1']
+        include:
+          # Oldest supported pg driver, newest Node lines.
+          - { node: 22, postgres: '16', typeorm: '0.3', pg: '8.5.1' }
+          - { node: 20, postgres: '16', typeorm: '1' }
+          - { node: 24, postgres: '16', typeorm: '1' }
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Select TypeORM / pg versions under test
+        run: |
+          npm install --no-save --no-audit --no-fund "typeorm@${{ matrix.typeorm }}"
+          if [ -n "${{ matrix.pg }}" ]; then npm install --no-save --no-audit --no-fund "pg@${{ matrix.pg }}"; fi
+          grep -m1 '"version"' node_modules/typeorm/package.json node_modules/pg/package.json
+      - run: npm run typecheck
+      - run: npm test
+
+  tarball:
+    name: install from tarball and run the README flow
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        typeorm: ['0.3', '1']
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: scripts/verify-tarball.sh "${{ matrix.typeorm }}"
