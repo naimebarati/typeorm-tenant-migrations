@@ -3,6 +3,14 @@
   "version": "0.1.0-alpha.1",
   "description": "Run TypeORM migrations safely across PostgreSQL schema-per-tenant databases: per-tenant history, advisory locks, enforced search_path, read-only plan/status.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/naimebarati/typeorm-tenant-migrations.git"
+  },
+  "bugs": {
+    "url": "https://github.com/naimebarati/typeorm-tenant-migrations/issues"
+  },
+  "homepage": "https://github.com/naimebarati/typeorm-tenant-migrations#readme",
   "keywords": [
     "typeorm",
     "migrations",
