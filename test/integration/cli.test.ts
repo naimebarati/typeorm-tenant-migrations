@@ -204,3 +204,72 @@ describe('--help / --version', () => {
     expect(v.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });
 });
+
+describe('in-process runCli (success paths, formatting and exit codes)', () => {
+  it('--help and --version', async () => {
+    const help = await cli(['--help']);
+    expect(help.code).toBe(EXIT.OK);
+    expect(help.stdout).toContain('Exit codes:');
+    const version = await cli(['-v']);
+    expect(version.code).toBe(EXIT.OK);
+    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('rejects a missing/odd command and stray arguments', async () => {
+    const p = writeProject({ db, migrations: normal });
+    expect((await cli(['--all', '--config', p.config])).code).toBe(EXIT.USAGE);
+    expect((await cli(['run', 'extra', '--all', '--config', p.config])).stderr).toContain('Unexpected argument "extra"');
+  });
+
+  it('plan: human output, exit 0, database untouched', async () => {
+    const p = writeProject({ db, migrations: normal });
+    const before = await snapshotDatabase(db.client);
+    const r = await cli(['plan', '--all', '--config', p.config]);
+    expect(r.code).toBe(EXIT.OK);
+    expect(r.stdout).toContain('pending: 2');
+    expect(r.stdout).toContain('Nothing was changed.');
+    expect(await snapshotDatabase(db.client)).toEqual(before);
+  });
+
+  it('status: json and human', async () => {
+    const p = writeProject({ db, migrations: normal });
+    await cli(['run', '--tenant', 'alpha', '--config', p.config]);
+    const json = JSON.parse((await cli(['status', '--all', '--json', '--config', p.config])).stdout);
+    expect(json.tenants.map((t: { historyTableExists: boolean }) => t.historyTableExists)).toEqual([true, false]);
+    const human = await cli(['status', '--all', '--config', p.config]);
+    expect(human.stdout).toContain('(no history table yet)');
+  });
+
+  it('run: human output and flag overrides reach the runner (concurrency, transaction, lock timeout)', async () => {
+    const p = writeProject({ db, migrations: normal });
+    const r = await cli(['run', '--all', '--concurrency', '2', '--transaction', 'all', '--lock-timeout', '5000', '--config', p.config]);
+    expect(r.code).toBe(EXIT.OK);
+    expect(r.stdout).toContain('Summary: 2 tenant(s) — 2 migrated');
+    expect(r.stderr).toContain("concurrency 2, transaction 'all'");
+  });
+
+  it('run: exit 1 for a failed tenant, with continue-on-error flag honored', async () => {
+    const p = writeProject({ db, migrations: [M.failsOnBeta] });
+    const r = await cli(['run', '--all', '--continue-on-error', '--json', '--config', p.config]);
+    expect(r.code).toBe(EXIT.TENANT_FAILED);
+    expect(JSON.parse(r.stdout).tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'failed']);
+  });
+
+  it('run: exit 3 when the lock cannot be taken, 1 if something also failed', async () => {
+    const p = writeProject({ db, migrations: normal });
+    const holder = await acquireAdvisoryLock({ ...db.options }, { schema: 'tenant_alpha', timeoutMs: 0 });
+    try {
+      const locked = await cli(['run', '--tenant', 'alpha', '--lock-timeout', '100', '--config', p.config]);
+      expect(locked.code).toBe(EXIT.LOCKED);
+      expect(locked.stdout).toContain('LOCKED');
+    } finally {
+      await holder.release();
+    }
+  });
+
+  it('plan/status exit 1 when a tenant cannot be inspected', async () => {
+    const p = writeProject({ db, migrations: normal, tenants: [{ id: 'ghost', schema: 'tenant_ghost' }] });
+    expect((await cli(['plan', '--all', '--config', p.config])).code).toBe(EXIT.TENANT_FAILED);
+    expect((await cli(['status', '--all', '--config', p.config])).code).toBe(EXIT.TENANT_FAILED);
+  });
+});
