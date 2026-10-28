@@ -26,7 +26,7 @@ jobs:
         run: npm pack --dry-run
 
   test:
-    name: tests (typeorm ${{ matrix.typeorm }}, postgres ${{ matrix.postgres }}, node ${{ matrix.node }}${{ matrix.pg && format(', pg {0}', matrix.pg) || '' }})
+    name: tests (typeorm ${{ matrix.typeorm }}, postgres ${{ matrix.postgres }}, node ${{ matrix.node }}, pg ${{ matrix.pg }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -34,11 +34,14 @@ jobs:
         node: [22]
         postgres: ['16', '18']
         typeorm: ['0.3.20', '0.3', '1']
+        # '8' = newest 8.x. It is an axis (not only an include key) so that the pg 8.5.1 entry below
+        # becomes its own job instead of being merged into an existing combination.
+        pg: ['8']
         include:
-          # Oldest supported pg driver, newest Node lines.
+          # Oldest supported pg driver, and the Node lines on either side of 22.
           - { node: 22, postgres: '16', typeorm: '0.3', pg: '8.5.1' }
-          - { node: 20, postgres: '16', typeorm: '1' }
-          - { node: 24, postgres: '16', typeorm: '1' }
+          - { node: 20, postgres: '16', typeorm: '1', pg: '8' }
+          - { node: 24, postgres: '16', typeorm: '1', pg: '8' }
     services:
       postgres:
         image: postgres:${{ matrix.postgres }}
@@ -63,7 +66,7 @@ jobs:
       - name: Select TypeORM / pg versions under test
         run: |
           npm install --no-save --no-audit --no-fund "typeorm@${{ matrix.typeorm }}"
-          if [ -n "${{ matrix.pg }}" ]; then npm install --no-save --no-audit --no-fund "pg@${{ matrix.pg }}"; fi
+          npm install --no-save --no-audit --no-fund "pg@${{ matrix.pg }}"
           grep -m1 '"version"' node_modules/typeorm/package.json node_modules/pg/package.json
       - run: npm run typecheck
       - run: npm test
