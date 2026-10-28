@@ -1,0 +1,63 @@
+{
+  "name": "typeorm-tenant-migrations",
+  "version": "0.1.0-alpha.1",
+  "description": "Run TypeORM migrations safely across PostgreSQL schema-per-tenant databases: per-tenant history, advisory locks, enforced search_path, read-only plan/status.",
+  "license": "MIT",
+  "keywords": [
+    "typeorm",
+    "migrations",
+    "postgres",
+    "postgresql",
+    "multi-tenant",
+    "schema-per-tenant",
+    "advisory-lock"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "typeorm-tenant-migrations": "./dist/cli/bin.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.11.0"
+  },
+  "peerDependencies": {
+    "pg": ">=8.5.1 <9.0.0",
+    "typeorm": ">=0.3.20 <0.4.0 || >=1.0.0 <2.0.0"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "eslint": "^10.13.0",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typeorm": "0.3.31",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}
