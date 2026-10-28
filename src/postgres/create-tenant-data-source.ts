@@ -24,6 +24,9 @@ const silentTypeOrmLogger: Logger = {
 };
 
 export function resolveBaseOptions(source: DataSource | DataSourceOptions): PostgresOptions {
+  if (!source || typeof source !== 'object') {
+    throw new TenantMigrationError('INVALID_CONFIGURATION', '"dataSource" must be a DataSource or DataSourceOptions.');
+  }
   const options: DataSourceOptions =
     typeof (source as DataSource).initialize === 'function' ? (source as DataSource).options : (source as DataSourceOptions);
   if (!options || typeof options !== 'object') {

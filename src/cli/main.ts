@@ -125,7 +125,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (values['lock-timeout'] !== undefined) overrides.lockTimeoutMs = Number(values['lock-timeout']);
     const runner = new TenantMigrationRunner({
       ...config,
-      options: { logger: createConsoleLogger(), ...config.options, ...overrides },
+      options: { logger: createConsoleLogger({ stream: io.stderr }), ...config.options, ...overrides },
     });
 
     if (command === 'plan') {

@@ -8,12 +8,13 @@ export const silentLogger: TenantMigrationLogger = {
 };
 
 /**
- * Writes to stderr so that stdout stays reserved for the (possibly JSON) result of a CLI command.
+ * Writes to stderr (or the given stream) so that stdout stays reserved for the possibly-JSON
+ * result of a CLI command.
  */
-export function createConsoleLogger(options: { debug?: boolean } = {}): TenantMigrationLogger {
+export function createConsoleLogger(options: { debug?: boolean; stream?: { write(text: string): unknown } } = {}): TenantMigrationLogger {
   const write = (level: string, message: string, meta?: Record<string, unknown>) => {
     const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
-    process.stderr.write(`[typeorm-tenant-migrations] ${level} ${message}${suffix}\n`);
+    (options.stream ?? process.stderr).write(`[typeorm-tenant-migrations] ${level} ${message}${suffix}\n`);
   };
   return {
     debug: options.debug ? (m, meta) => write('DEBUG', m, meta) : undefined,
