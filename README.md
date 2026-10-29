@@ -310,7 +310,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 
 Everything below was **actually run**; nothing is inferred. The suite is unit + integration + CLI tests against a real database.
 
-### GitHub Actions (last verified at commit `9592035`: all 20 jobs green)
+### GitHub Actions (last verified at commit `54d8c14`: all 20 jobs green)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
