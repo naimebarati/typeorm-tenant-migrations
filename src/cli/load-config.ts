@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,15 +12,38 @@ function configError(message: string, cause?: unknown): never {
   throw new TenantMigrationError('INVALID_CONFIGURATION', message, cause === undefined ? undefined : { cause });
 }
 
-/** Registers the optional `tsx` loader if the project has it. Returns whether it did. */
-async function tryRegisterTsx(cwd: string): Promise<boolean> {
+/**
+ * Finds tsx's ESM API next to the user's project, using the `import` condition of its public
+ * `exports` map. (`require.resolve('tsx/esm/api')` picks the CommonJS build, whose `register()`
+ * computes a wrong loader path.) Returns undefined when tsx is not installed.
+ */
+function findTsxEsmApi(cwd: string): string | undefined {
   try {
-    const resolved = createRequire(path.join(cwd, 'noop.js')).resolve('tsx/esm/api');
-    const api = (await import(pathToFileURL(resolved).href)) as { register?: () => unknown };
-    api.register?.();
-    return typeof api.register === 'function';
+    const pkgPath = createRequire(path.join(cwd, 'noop.js')).resolve('tsx/package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { exports?: Record<string, unknown> };
+    const entry = (pkg.exports?.['./esm/api'] as { import?: string | { default?: string } } | undefined)?.import;
+    const relative = typeof entry === 'string' ? entry : entry?.default;
+    return relative ? path.join(path.dirname(pkgPath), relative) : undefined;
   } catch {
-    return false;
+    return undefined;
+  }
+}
+
+type TsxApi = { tsImport: (specifier: string, parentURL: string) => Promise<unknown> };
+
+/**
+ * tsx's `tsImport` imports TypeScript on every Node version; globally registering tsx's loader does
+ * not, because Node's own type stripping (22.18+/24) handles `.ts` first and rejects syntax it
+ * cannot strip, such as `enum`. Returns undefined when tsx is not installed.
+ */
+async function loadTsx(cwd: string): Promise<TsxApi | undefined> {
+  const apiFile = findTsxEsmApi(cwd);
+  if (!apiFile) return undefined;
+  try {
+    const api = (await import(pathToFileURL(apiFile).href)) as Partial<TsxApi>;
+    return typeof api.tsImport === 'function' ? (api as TsxApi) : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -37,20 +60,21 @@ export async function loadConfig(configPath: string, cwd: string): Promise<Tenan
   if (!SUPPORTED.has(ext)) configError(`Unsupported config file type "${ext}". Use .js, .cjs, .mjs or (with tsx installed) .ts.`);
 
   const isTs = TS_EXTENSIONS.has(ext);
-  const tsxRegistered = isTs ? await tryRegisterTsx(cwd) : false;
 
+  const tsx = isTs ? await loadTsx(cwd) : undefined;
   let mod: unknown;
   try {
-    mod = await import(pathToFileURL(absolute).href);
+    mod = tsx ? await tsx.tsImport(absolute, pathToFileURL(absolute).href) : await import(pathToFileURL(absolute).href);
   } catch (cause) {
-    if (isTs && !tsxRegistered) {
+    if (isTs && !tsx) {
+      // Without tsx, Node can only load TypeScript that its own type stripping understands (22.18+/24+, no enums etc.).
       configError(
         `Could not load the TypeScript config ${absolute}. Install "tsx" in your project (npm i -D tsx), or point --config at a compiled .js file.`,
         cause,
       );
     }
     // The loaded file's own error message is deliberately not included: it may contain secrets.
-    configError(`Could not load the config file ${absolute}. Fix the error it throws when imported.`, cause);
+    configError(`Could not load the config file ${absolute}${tsx ? ' (with tsx)' : ''}. Fix the error it throws when imported.`, cause);
   }
 
   let exported: unknown = mod;

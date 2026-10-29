@@ -157,6 +157,19 @@ export function buildLockDataSourceOptions(base: PostgresOptions): PostgresOptio
   };
 }
 
+/**
+ * Migration files are imported by TypeORM through Node itself, not through this tool or tsx. The
+ * errors this produces (TypeScript Node cannot strip, CommonJS vs ES module mix-ups) are easy to
+ * mistake for connection problems, so say what to do.
+ */
+const MODULE_LOADING_ERROR =
+  /TypeScript|strip-only|ERR_UNKNOWN_FILE_EXTENSION|Unknown file extension|\.ts\b|Cannot use import statement|require is not defined|module is not defined|exports is not defined|ERR_REQUIRE_ESM/i;
+function moduleLoadingHint(message: string): string {
+  return MODULE_LOADING_ERROR.test(message)
+    ? ' (Hint: this looks like a migration file Node could not load. Point "migrations" at compiled JavaScript, or use TypeScript Node can strip, and keep CommonJS and ES modules consistent.)'
+    : '';
+}
+
 export async function initializeOwned(options: DataSourceOptions, redact: (text: string) => string = (t) => t): Promise<DataSource> {
   const dataSource = new DataSourceClass(options);
   try {
@@ -164,7 +177,7 @@ export async function initializeOwned(options: DataSourceOptions, redact: (text:
   } catch (cause) {
     // A partially initialized DataSource may still hold a pool.
     if (dataSource.isInitialized) await dataSource.destroy().catch(() => undefined);
-    const detail = cause instanceof Error && cause.message ? `: ${redact(cause.message).slice(0, 500)}` : '';
+    const detail = cause instanceof Error && cause.message ? `: ${redact(cause.message).slice(0, 500)}${moduleLoadingHint(cause.message)}` : '';
     throw new TenantMigrationError('DATASOURCE_INITIALIZATION_FAILED', `Could not initialize the DataSource (connection or migration loading failed)${detail}`, { cause });
   }
   return dataSource;

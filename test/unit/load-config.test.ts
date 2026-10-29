@@ -100,6 +100,16 @@ describe('loadConfig: TypeScript without tsx installed (real Node process; vites
     expect(result.message).toContain('compiled .js');
   });
 
+  it('with tsx resolvable, the same enum config loads (tsx does what Node cannot)', () => {
+    write('enum2.ts', `enum Mode { A = 'a' }\nexport default { dataSource: { type: 'postgres', m: Mode.A }, tenants: [{ id: 'a', schema: 'tenant_a' }] };`);
+    const repoRoot = path.resolve(__dirname, '..', '..');
+    const script = `require(${JSON.stringify(DIST)}).loadConfig(${JSON.stringify(path.join(dir, 'enum2.ts'))}, ${JSON.stringify(repoRoot)}).then(
+      (c) => console.log(JSON.stringify({ ok: true, tenants: c.tenants.length })),
+      (e) => console.log(JSON.stringify({ ok: false, code: e.code, message: e.message })))`;
+    const r = spawnSync(process.execPath, ['-e', script], { cwd: repoRoot, encoding: 'utf8' });
+    expect(JSON.parse(r.stdout.trim().split('\n').pop() ?? '{}')).toMatchObject({ ok: true, tenants: 1 });
+  });
+
   it('plain type annotations load natively only where Node strips types; elsewhere the same helpful error', () => {
     write('plain.ts', `const c: { dataSource: object; tenants: object[] } = ${shape};\nexport default c;`);
     const result = inFreshNode('plain.ts');
