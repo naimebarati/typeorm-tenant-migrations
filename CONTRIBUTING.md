@@ -35,3 +35,12 @@ npm pack --dry-run
 * New defaults must be at least as conservative as the old ones.
 
 * Coverage thresholds only go up. If a change lowers coverage, add the test; don't lower the threshold.
+
+## CI and releases
+
+* `ci.yml` runs on every push to `main`, on pull requests, on demand, and once a week (Mondays, default branch). The weekly run exists because the matrix installs the newest 0.3.x / 1.x TypeORM and `pg` 8.x: a new upstream release can break this package without any push here.
+* Releases go through `release.yml` with npm trusted publishing, so no npm token is stored. One-time setup on npmjs.com: the package's Settings > Trusted Publisher > GitHub Actions, with this repository and the workflow file name `release.yml`.
+  1. Set `version` in `package.json`, update `CHANGELOG.md`, merge to `main`, wait for a green `ci.yml`.
+  2. `git tag v<version> && git push origin v<version>`. The workflow refuses a tag that does not match `package.json`, is not on `main`, or whose version is already published; it then runs lint, typecheck and the full test suite against PostgreSQL 16 and runs `npm publish --provenance`.
+  3. The npm dist-tag comes from the version: `0.2.0-beta.1` is published as `beta`, `1.0.0-rc.1` as `rc`, `1.0.0` as `latest`.
+* *Actions > Release > Run workflow* on any branch runs the same checks and ends in `npm publish --dry-run`, so the pipeline can be exercised without publishing.

@@ -1,0 +1,87 @@
+name: Release
+
+# Publishes to npm with provenance through npm trusted publishing (OIDC): no npm token is stored anywhere.
+#
+#   git tag v0.1.0-beta.1 && git push origin v0.1.0-beta.1     -> checks, then `npm publish`
+#   Actions > Release > Run workflow (any branch)               -> the same checks, then `npm publish --dry-run`
+#
+# One-time setup on npmjs.com (package > Settings > Trusted Publisher > GitHub Actions):
+#   organization/user: naimebarati   repository: typeorm-tenant-migrations   workflow filename: release.yml
+# Trusted publishing needs the package to exist (it does) and npm >= 11.5.1 (checked below).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: ${{ github.ref_type == 'tag' && 'publish to npm' || 'dry run (no publish)' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing + provenance
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # the tag must be reachable from main (checked below)
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: npm supports trusted publishing
+        run: |
+          node -e "
+            const v = require('child_process').execSync('npm --version').toString().trim().split('.').map(Number);
+            const ok = v[0] > 11 || (v[0] === 11 && (v[1] > 5 || (v[1] === 5 && v[2] >= 1)));
+            console.log('npm', v.join('.'), ok ? 'ok' : 'is older than 11.5.1');
+            process.exit(ok ? 0 : 1);
+          "
+      - name: The tag matches package.json and sits on main
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "v$VERSION" || { echo "tag $GITHUB_REF_NAME does not match package.json version $VERSION"; exit 1; }
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag commit is not on main"; exit 1; }
+          if npm view "typeorm-tenant-migrations@$VERSION" version >/dev/null 2>&1; then echo "$VERSION is already published"; exit 1; fi
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Tests (real PostgreSQL 16)
+        run: npm test
+      - name: dist-tag from the version (alpha/beta/rc, otherwise latest)
+        id: tag
+        run: |
+          TAG=$(node -p "const p = require('./package.json').version.split('-')[1]; p ? p.split('.')[0] : 'latest'")
+          echo "dist-tag: $TAG"
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        if: github.ref_type == 'tag'
+        run: npm publish --provenance --access public --tag "${{ steps.tag.outputs.name }}"
+      - name: Dry run
+        if: github.ref_type != 'tag'
+        run: npm publish --dry-run --access public --tag "${{ steps.tag.outputs.name }}"
