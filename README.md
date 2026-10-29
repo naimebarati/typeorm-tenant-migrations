@@ -2,7 +2,7 @@
 
 Run your normal **TypeORM migrations** across a PostgreSQL database that uses **one schema per tenant** — one tenant, a few, or all of them — with the guard rails a multi-tenant deploy needs.
 
-> **Status: `0.1.0-alpha.1`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 16 and 18 (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
+> **Status: `0.1.0-alpha.1`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux, and on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
 
 ## The problem
 
@@ -310,7 +310,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 
 Everything below was **actually run**; nothing is inferred. The suite is unit + integration + CLI tests against a real database.
 
-### GitHub Actions (last verified at commit `2bd6d76`: all 13 jobs green)
+### GitHub Actions (last verified at commit `cebfec9`: all 20 jobs green)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
@@ -323,6 +323,20 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 | latest 1.x | latest 8.x | 18 | 22 | pass |
 | latest 1.x | latest 8.x | 16 | 20 | pass |
 | latest 1.x | latest 8.x | 16 | 24 | pass |
+| latest 1.x | latest 8.x | 12 | 22 | pass |
+| latest 1.x | latest 8.x | 13 | 22 | pass |
+| latest 1.x | latest 8.x | 14 | 22 | pass |
+| latest 1.x | latest 8.x | 15 | 22 | pass |
+| latest 1.x | latest 8.x | 17 | 22 | pass |
+
+All rows run on Ubuntu with the `postgres:<major>` image as a service container. Two more jobs run on other operating systems, with PostgreSQL installed natively (service containers exist only on Linux):
+
+| OS (GitHub-hosted `-latest`) | PostgreSQL | Node | TypeORM / pg | Result | Not exercised there |
+| --- | --- | --- | --- | --- | --- |
+| macOS | 16 (Homebrew; password auth enabled in `pg_hba.conf`) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass | PgBouncer and TLS tests (no PgBouncer, server without TLS) |
+| Windows | 16 (Chocolatey) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass | PgBouncer and TLS tests (same reason); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
+
+The run found and fixed Windows problems that Linux could not show: `tsImport` needs a file URL rather than a `D:\…` path, and migration globs must use forward slashes (see [Module formats](#module-formats)).
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. The test jobs install PgBouncer and run with `TTM_REQUIRE_PGBOUNCER=1`, so the PgBouncer tests cannot be skipped silently; a separate `tls` job turns TLS on in the PostgreSQL service and runs the TLS tests with `TTM_REQUIRE_SSL=1`. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
@@ -337,7 +351,7 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 | 0.3.31 | 8.5.1 | 16.15 | 22.22 | 301 / 301 pass |
 | 0.3.31 | 8.11.5 | 16.15 | 22.22 | 301 / 301 pass |
 
-`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18 (the TLS tests ran locally on 16 and are in a separate CI job), Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
+`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12, PostgreSQL 18 on macOS/Windows, Node other than 20/22/24 (Node 20/24 only on Linux), other architectures, TLS and PgBouncer on macOS/Windows, graceful interruption by signal on Windows, connection poolers other than PgBouncer 1.22.
 
 ## Contributing
 
