@@ -9,7 +9,7 @@ npm ci
 export TTM_TEST_PG_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
 ```
 
-The role in `TTM_TEST_PG_URL` must be a superuser (tests create and drop databases and throwaway roles, including a `SUPERUSER` one to prove secrets are scrubbed). Each integration file creates its own database and drops it afterwards.
+The server must enforce passwords on TCP (some tests prove that a wrong password is rejected and does not leak; they fail early with an explanation if pg_hba.conf says `trust`, which is Homebrew's default). The role in `TTM_TEST_PG_URL` must be a superuser (tests create and drop databases and throwaway roles, including a `SUPERUSER` one to prove secrets are scrubbed). Each integration file creates its own database and drops it afterwards.
 
 `TTM_REQUIRE_PGBOUNCER=1` and `TTM_REQUIRE_SSL=1` turn "PgBouncer / TLS not available" from a skip into a failure (CI sets them). Optional locally: install `pgbouncer` (or set `TTM_PGBOUNCER_BIN`) so `pgbouncer.test.ts` runs instead of being skipped. The tests start their own PgBouncer on a free port (as the `postgres` user when run as root, since PgBouncer refuses to run as root).
 

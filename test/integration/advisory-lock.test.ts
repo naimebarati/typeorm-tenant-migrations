@@ -3,12 +3,13 @@ import { computeLockKey } from '../../src/postgres/advisory-lock.js';
 import { acquireAdvisoryLock } from '../../src/postgres/advisory-lock.js';
 import type { PostgresOptions } from '../../src/postgres/create-tenant-data-source.js';
 import type { TestDatabase } from '../helpers/pg.js';
-import { createTestDatabase } from '../helpers/pg.js';
+import { createTestDatabase, requirePasswordAuth } from '../helpers/pg.js';
 
 let db: TestDatabase;
 let base: PostgresOptions;
 beforeAll(async () => {
   db = await createTestDatabase();
+  await requirePasswordAuth(db);
   base = { ...db.options };
 });
 afterAll(async () => {

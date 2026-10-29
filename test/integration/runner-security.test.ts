@@ -5,7 +5,7 @@ import { TenantMigrationRunner } from '../../src/runner/tenant-migration-runner.
 import { defineMigration, goodMigrations } from '../fixtures/migrations.js';
 import { seedTenants } from '../helpers/fixtures.js';
 import type { TestDatabase } from '../helpers/pg.js';
-import { createTestDatabase, waitForNoSessions } from '../helpers/pg.js';
+import { createTestDatabase, requirePasswordAuth, waitForNoSessions } from '../helpers/pg.js';
 import { ALL, ALPHA, capturingLogger } from '../helpers/runner.js';
 
 const PASSWORD = 'Sup3r-Secret-Pw-Sample';
@@ -15,6 +15,7 @@ let role: string;
 
 beforeAll(async () => {
   db = await createTestDatabase();
+  await requirePasswordAuth(db);
   role = `ttm_sec_${randomBytes(4).toString('hex')}`;
   await db.client.query(`CREATE ROLE ${role} LOGIN SUPERUSER PASSWORD '${PASSWORD}'`);
 });

@@ -3,12 +3,13 @@ import { acquireAdvisoryLock } from '../../src/postgres/advisory-lock.js';
 import { EXIT, runCli } from '../../src/cli/main.js';
 import { seedTenants } from '../helpers/fixtures.js';
 import type { TestDatabase } from '../helpers/pg.js';
-import { advisoryLocksHeld, columnsOf, createTestDatabase, snapshotDatabase, tablesOf, waitForNoSessions } from '../helpers/pg.js';
+import { advisoryLocksHeld, columnsOf, createTestDatabase, requirePasswordAuth, snapshotDatabase, tablesOf, waitForNoSessions } from '../helpers/pg.js';
 import { MIGRATION_BODIES as M, REPO_ROOT, runBin, writeProject } from '../helpers/cli-project.js';
 
 let db: TestDatabase;
 beforeAll(async () => {
   db = await createTestDatabase();
+  await requirePasswordAuth(db);
 });
 afterAll(async () => {
   await db.drop();

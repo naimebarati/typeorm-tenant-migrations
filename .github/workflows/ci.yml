@@ -187,6 +187,13 @@ jobs:
           brew services start postgresql@${{ matrix.pgmajor }}
           for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
           "$BIN/psql" -h 127.0.0.1 -d postgres -c "CREATE ROLE postgres SUPERUSER LOGIN PASSWORD 'postgres'"
+          # Homebrew initializes with "trust": any password would be accepted, which defeats the tests that
+          # prove a wrong password is rejected. Require passwords, then restart.
+          DATA="$(brew --prefix)/var/postgresql@${{ matrix.pgmajor }}"
+          sed -i '' -E 's/[[:space:]]trust$/ scram-sha-256/' "$DATA/pg_hba.conf"
+          brew services restart postgresql@${{ matrix.pgmajor }}
+          for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
+          PGPASSWORD=postgres "$BIN/psql" -h 127.0.0.1 -U postgres -d postgres -tAc "select 'password auth ok'"
       - name: Install and start PostgreSQL (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

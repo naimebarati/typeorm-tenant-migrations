@@ -128,3 +128,24 @@ export async function advisoryLocksHeld(db: TestDatabase): Promise<string[]> {
   );
   return rows.map((r) => r.key as string);
 }
+
+/**
+ * Several tests prove that a wrong password is rejected and that secrets do not leak from the resulting
+ * error. On a server whose pg_hba.conf says `trust` for TCP (Homebrew's default) any password is accepted
+ * and those tests would fail in a confusing way, so check the precondition and say what is wrong.
+ */
+export async function requirePasswordAuth(db: TestDatabase): Promise<void> {
+  const o = db.options;
+  const client = new Client({ host: String(o.host), port: Number(o.port), user: String(o.username), password: 'definitely-the-wrong-password', database: String(o.database) });
+  let accepted = false;
+  try {
+    await client.connect();
+    accepted = true;
+    await client.end();
+  } catch {
+    /* rejected, as required */
+  }
+  if (accepted) {
+    throw new Error('The test PostgreSQL accepts a wrong password (pg_hba.conf uses "trust" for TCP connections). These tests need password authentication; see CONTRIBUTING.md.');
+  }
+}

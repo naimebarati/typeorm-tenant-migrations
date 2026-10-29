@@ -64,7 +64,9 @@ export async function loadConfig(configPath: string, cwd: string): Promise<Tenan
   const tsx = isTs ? await loadTsx(cwd) : undefined;
   let mod: unknown;
   try {
-    mod = tsx ? await tsx.tsImport(absolute, pathToFileURL(absolute).href) : await import(pathToFileURL(absolute).href);
+    // A file URL, not the bare path: on Windows "D:\\..." would be read as a URL with scheme "d:".
+    const fileUrl = pathToFileURL(absolute).href;
+    mod = tsx ? await tsx.tsImport(fileUrl, fileUrl) : await import(fileUrl);
   } catch (cause) {
     if (isTs && !tsx) {
       // Without tsx, Node can only load TypeScript that its own type stripping understands (22.18+/24+, no enums etc.).
