@@ -333,8 +333,8 @@ All rows run on Ubuntu with the `postgres:<major>` image as a service container.
 
 | OS (GitHub-hosted `-latest`) | PostgreSQL | Node | TypeORM / pg | Result | Not exercised there |
 | --- | --- | --- | --- | --- | --- |
-| macOS | 16 (Homebrew; password auth enabled in `pg_hba.conf`) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass | PgBouncer and TLS tests (no PgBouncer, server without TLS) |
-| Windows | 16 (Chocolatey) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass | PgBouncer and TLS tests (same reason); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
+| macOS | 16 (Homebrew; password auth enabled in `pg_hba.conf`) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass: 301 passed, 13 skipped (8 PgBouncer + 5 TLS tests; read from the job log) | PgBouncer and TLS tests (no PgBouncer, server without TLS) |
+| Windows | 16 (Chocolatey) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass: 298 passed, 16 skipped (8 PgBouncer + 5 TLS + 3 signal tests; read from the job log) | PgBouncer and TLS tests (same reason); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
 
 The run found and fixed Windows problems that Linux could not show: `tsImport` needs a file URL rather than a `D:\…` path, and migration globs must use forward slashes (see [Module formats](#module-formats)).
 
