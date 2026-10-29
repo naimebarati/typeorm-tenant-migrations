@@ -310,7 +310,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 
 Everything below was **actually run**; nothing is inferred. The suite is unit + integration + CLI tests against a real database.
 
-### GitHub Actions (commit `b519d16`, run #2: all 12 jobs green)
+### GitHub Actions (last verified at commit `2bd6d76`: all 13 jobs green)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
@@ -324,7 +324,7 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 | latest 1.x | latest 8.x | 16 | 20 | pass |
 | latest 1.x | latest 8.x | 16 | 24 | pass |
 
-"latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
+"latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. The test jobs install PgBouncer and run with `TTM_REQUIRE_PGBOUNCER=1`, so the PgBouncer tests cannot be skipped silently; a separate `tls` job turns TLS on in the PostgreSQL service and runs the TLS tests with `TTM_REQUIRE_SSL=1`. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
 ### Local runs with exact versions (301 tests each)
 
