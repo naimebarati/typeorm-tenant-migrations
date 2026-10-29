@@ -43,6 +43,8 @@ const quiet = async () => {
   expect(await advisoryLocksHeld(db)).toEqual([]);
 };
 
+const posix = process.platform !== 'win32'; // on Windows child.kill() terminates unconditionally and reports no signal
+
 describe('SIGKILL (cannot be handled) in the middle of a migration', () => {
   it('leaves nothing half-done: transaction rolled back, lock and sessions released, next run completes', async () => {
     const p = writeProject({ db, migrations: [M.slowAudit] });
@@ -51,7 +53,9 @@ describe('SIGKILL (cannot be handled) in the middle of a migration', () => {
     await waitUntil(migrationIsRunning);
     expect(await advisoryLocksHeld(db)).toHaveLength(1);
     running.child.kill('SIGKILL');
-    expect((await running.done).signal).toBe('SIGKILL');
+    const ended = await running.done;
+    if (posix) expect(ended.signal).toBe('SIGKILL');
+    else expect(ended.code).not.toBe(0);
 
     // The server finishes the statement it is in, notices the client is gone, rolls the transaction back and ends the session.
     await quiet();
@@ -67,7 +71,7 @@ describe('SIGKILL (cannot be handled) in the middle of a migration', () => {
   });
 });
 
-describe.each(['SIGINT', 'SIGTERM'] as const)('%s during a multi-tenant run: graceful stop', (signal) => {
+describe.skipIf(!posix).each(['SIGINT', 'SIGTERM'] as const)('%s during a multi-tenant run: graceful stop', (signal) => {
   it('finishes the tenant that is running, starts no new one, prints the report, exits 130', async () => {
     const p = writeProject({ db, migrations: [M.slowAudit], tenants: TENANTS });
     const running = startBin(['run', '--all', '--json', '--config', p.config]);
@@ -99,7 +103,7 @@ describe.each(['SIGINT', 'SIGTERM'] as const)('%s during a multi-tenant run: gra
   });
 });
 
-describe('a second signal aborts immediately', () => {
+describe.skipIf(!posix)('a second signal aborts immediately', () => {
   it('the process dies at once; PostgreSQL rolls back the open transaction; nothing is left behind', async () => {
     const p = writeProject({ db, migrations: [M.slowAudit], tenants: TENANTS });
     const running = startBin(['run', '--all', '--json', '--config', p.config]);

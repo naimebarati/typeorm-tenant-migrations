@@ -42,6 +42,12 @@ jobs:
           - { node: 22, postgres: '16', typeorm: '0.3', pg: '8.5.1' }
           - { node: 20, postgres: '16', typeorm: '1', pg: '8' }
           - { node: 24, postgres: '16', typeorm: '1', pg: '8' }
+          # The other PostgreSQL majors, with the newest TypeORM line.
+          - { node: 22, postgres: '12', typeorm: '1', pg: '8' }
+          - { node: 22, postgres: '13', typeorm: '1', pg: '8' }
+          - { node: 22, postgres: '14', typeorm: '1', pg: '8' }
+          - { node: 22, postgres: '15', typeorm: '1', pg: '8' }
+          - { node: 22, postgres: '17', typeorm: '1', pg: '8' }
     services:
       postgres:
         image: postgres:${{ matrix.postgres }}
@@ -152,3 +158,43 @@ jobs:
           test "$(PGPASSWORD=postgres psql -h localhost -U postgres -tAc 'SHOW ssl')" = "on"
       - name: TLS tests
         run: npx vitest run test/integration/ssl.test.ts
+
+  os:
+    name: ${{ matrix.os }} (native PostgreSQL ${{ matrix.pgmajor }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, pgmajor: '16' }
+          - { os: windows-latest, pgmajor: '16' }
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and start PostgreSQL (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install postgresql@${{ matrix.pgmajor }}
+          BIN="$(brew --prefix postgresql@${{ matrix.pgmajor }})/bin"
+          echo "$BIN" >> "$GITHUB_PATH"
+          brew services start postgresql@${{ matrix.pgmajor }}
+          for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
+          "$BIN/psql" -h 127.0.0.1 -d postgres -c "CREATE ROLE postgres SUPERUSER LOGIN PASSWORD 'postgres'"
+      - name: Install and start PostgreSQL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install postgresql${{ matrix.pgmajor }} --no-progress -y --params "/Password:postgres"
+          $bin = "C:\Program Files\PostgreSQL\${{ matrix.pgmajor }}\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          for ($i = 0; $i -lt 30; $i++) { & "$bin\pg_isready.exe" -h 127.0.0.1; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

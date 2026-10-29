@@ -56,7 +56,7 @@ export function writeProject({ db, kind = 'cjs', migrationFormat = 'cjs', migrat
   const body = {
     dataSource: {
       ...db.options,
-      migrations: [path.join(dir, 'migrations', `*.${ext}`)],
+      migrations: [path.join(dir, 'migrations', `*.${ext}`).split(path.sep).join('/')],
       ...dbOverrides,
     },
     tenants: tenants ?? [

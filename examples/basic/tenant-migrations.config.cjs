@@ -11,7 +11,8 @@ const dataSource = new DataSource({
   database: process.env.DB_NAME ?? 'app',
   synchronize: false,
   migrationsRun: false,
-  migrations: [path.join(__dirname, 'migrations', '*.js')],
+  // Globs need forward slashes, also on Windows (a backslash is a glob escape character).
+  migrations: [path.join(__dirname, 'migrations', '*.js').split(path.sep).join('/')],
 });
 
 module.exports = {

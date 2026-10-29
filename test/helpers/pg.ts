@@ -67,7 +67,13 @@ export async function createTestDatabase(): Promise<TestDatabase> {
       await client.end();
       const dropper = new Client(connectionConfig(adminUrl.pathname.slice(1) || 'postgres'));
       await dropper.connect();
-      await dropper.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      try {
+        await dropper.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      } catch {
+        // PostgreSQL 12 has no WITH (FORCE): end the sessions by hand, then drop.
+        await dropper.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [name]);
+        await dropper.query(`DROP DATABASE IF EXISTS ${name}`);
+      }
       await dropper.end();
     },
   };
