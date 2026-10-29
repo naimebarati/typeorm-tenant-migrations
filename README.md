@@ -142,7 +142,11 @@ typeorm-tenant-migrations <plan|status|run> --config <file> (--all | --tenant <i
 
 CLI flags override `options` from the config file. Relative migration globs are resolved by TypeORM against the **current working directory**; use absolute paths (as the examples do) to be independent of where you start the process.
 
-TypeScript configs: if [`tsx`](https://tsx.is) is resolvable from the working directory it is used (tested with tsx 4.x). Without it, Node's built-in type stripping loads configs that use only erasable type syntax (Node 22.18+ / 24+; verified on Node 22.22), while anything else (`enum`, decorators, older Node) fails with `INVALID_CONFIGURATION` telling you to install `tsx` or point `--config` at compiled `.js`. Both outcomes are tested in a real Node process.
+### Module formats
+
+* **Config files.** `.js` / `.cjs` / `.mjs` (including top-level `await`) and `.ts`. TypeScript configs are imported with [`tsx`](https://tsx.is)'s `tsImport` when `tsx` can be resolved from the working directory (tested with tsx 4.x, including syntax Node cannot strip, such as `enum`). Without `tsx`, Node's own type stripping loads configs that use only erasable type syntax (Node 22.18+ / 24+; verified on 22.22); anything else fails with `INVALID_CONFIGURATION` and a message telling you to install `tsx` or point `--config` at a compiled `.js` file.
+* **Migration files** are *not* loaded by this tool: TypeORM imports them through Node itself, so what Node can load is what works. Tested through the real binary: CommonJS `.js`, ES modules `.mjs` (default export, one class per file; and several named exports in one file), and TypeScript migrations that Node can strip (plain type annotations, Node 22.18+ / 24+). **TypeScript that needs a transform (`enum`, decorators, …) is not loaded, even if `tsx` is installed**; compile your migrations to JavaScript (the usual production setup) and point `migrations` at the output. When loading fails, the per-tenant error says so (`DATASOURCE_INITIALIZATION_FAILED` with a hint), e.g. a CommonJS migration inside a `"type": "module"` project.
+* Migration globs are resolved by TypeORM against the current working directory; use absolute paths to be independent of it.
 
 ### Exit codes
 
@@ -298,7 +302,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 * No cross-tenant atomicity; no `down`/rollback command (use TypeORM's CLI per tenant if you must); no drift detection; no schema/tenant discovery or creation; no run-at-startup helper.
 * The runner governs the connection context *before* your migrations. A migration that itself runs `SET search_path` (or schema-qualifies other tenants' names) can still do whatever it likes.
 * Pending migrations are determined with TypeORM's rule — by **name**, not by timestamp order — so a migration with an older timestamp than the newest executed one still runs. `plan`'s independent implementation of that rule is checked against what `run` really executes in the tests, on every TypeORM version in the matrix.
-* TypeORM's migration loading happens when each tenant DataSource is initialized, so entity/migration files are loaded once per tenant per phase (preflight + run). Keep `entities` empty or small in the config used for migrations.
+* TypeORM loads entity and migration files when each tenant DataSource is initialized, so they are loaded once per tenant per phase (preflight + run); keep `entities` small in the config you use for migrations. Entities in the config are fine: with entities that include views, generated columns or uuid generation, `plan`/`status` stay read-only, `synchronize` / `dropSchema` / `installExtensions` from your config are overridden (no entity-only table is created, no extension installed), and TypeORM's own bookkeeping table `typeorm_metadata` is created **inside each tenant schema** (never in `public`) when `run` executes against such entities. All tested.
 * `executedKnown: false` (history unreadable after failure) is exercised by a test that cuts the database connection mid-migration.
 * Only the first-party read-only/locking guarantees listed here are tested. Anything not listed (other drivers, replication, pgBouncer transaction mode, Windows paths, …) is untested.
 
@@ -322,16 +326,16 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
-### Local runs with exact versions (289 tests each)
+### Local runs with exact versions (301 tests each)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
-| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
-| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
-| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
-| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 289 / 289 pass |
-| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 289 / 289 pass |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
+| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 301 / 301 pass |
+| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 301 / 301 pass |
 
 `pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18 (the TLS tests ran locally on 16 and are in a separate CI job), Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
 
@@ -346,7 +350,7 @@ scripts/test-matrix.sh        # the TypeORM version matrix, one after another
 scripts/verify-tarball.sh     # pack, install into a clean dir, run the README flow
 ```
 
-`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 97.2 / 95.9 / 93.2 / 98.6). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary. Tests that need a real PgBouncer are skipped when no `pgbouncer` binary is found (`TTM_PGBOUNCER_BIN` overrides the lookup); locally and in CI one is installed so they run.
+`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 96.9 / 94.8 / 93.3 / 98.3). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary. Tests that need a real PgBouncer are skipped when no `pgbouncer` binary is found (`TTM_PGBOUNCER_BIN` overrides the lookup); locally and in CI one is installed so they run.
 
 Every integration file creates (and drops) its own database. More in [CONTRIBUTING.md](CONTRIBUTING.md). Architecture notes: [`docs/architecture.md`](docs/architecture.md).
 
