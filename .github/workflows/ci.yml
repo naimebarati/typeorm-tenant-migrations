@@ -73,10 +73,11 @@ jobs:
       - name: Install PgBouncer (its tests are skipped without it)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq pgbouncer
       - name: Select TypeORM / pg versions under test
+        # One install for both: a second `npm install --no-save` re-resolves the tree and silently puts the
+        # first package back to the lockfile version (every job here once ran TypeORM 0.3.31).
         run: |
-          npm install --no-save --no-audit --no-fund "typeorm@${{ matrix.typeorm }}"
-          npm install --no-save --no-audit --no-fund "pg@${{ matrix.pg }}"
-          grep -m1 '"version"' node_modules/typeorm/package.json node_modules/pg/package.json
+          npm install --no-save --no-audit --no-fund "typeorm@${{ matrix.typeorm }}" "pg@${{ matrix.pg }}"
+          node scripts/assert-versions.mjs typeorm "${{ matrix.typeorm }}" pg "${{ matrix.pg }}"
       - run: npm run typecheck
       - name: Tests
         if: ${{ !(matrix.typeorm == '1' && matrix.postgres == '18' && matrix.node == 22 && matrix.pg == '8') }}
