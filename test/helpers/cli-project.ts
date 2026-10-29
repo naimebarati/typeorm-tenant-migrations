@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import type { TestDatabase } from './pg.js';
 
@@ -83,4 +84,24 @@ export function runBin(args: string[], opts: { cwd?: string; env?: Record<string
     child.on('error', reject);
     child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+export interface RunningBin {
+  child: ChildProcess;
+  /** Resolves when the process has ended; `signal` is set when it was ended by a signal. */
+  done: Promise<ProcessResult & { signal: NodeJS.Signals | null }>;
+}
+
+/** Starts the real binary without waiting for it, so a test can signal it mid-run. */
+export function startBin(args: string[], opts: { cwd?: string } = {}): RunningBin {
+  const child = spawn(process.execPath, [BIN, ...args], { cwd: opts.cwd ?? REPO_ROOT, env: process.env });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d: Buffer) => (stdout += d));
+  child.stderr.on('data', (d: Buffer) => (stderr += d));
+  const done = new Promise<ProcessResult & { signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
+  return { child, done };
 }

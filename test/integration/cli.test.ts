@@ -272,4 +272,35 @@ describe('in-process runCli (success paths, formatting and exit codes)', () => {
     expect((await cli(['plan', '--all', '--config', p.config])).code).toBe(EXIT.TENANT_FAILED);
     expect((await cli(['status', '--all', '--config', p.config])).code).toBe(EXIT.TENANT_FAILED);
   });
+
+  it('a first SIGTERM during run stops gracefully (in-process; the second-signal path is covered with a real child process)', async () => {
+    await db.client.query('CREATE SCHEMA tenant_gamma; CREATE TABLE tenant_gamma.orders (id int); CREATE TABLE tenant_gamma.audit (note text)');
+    const p = writeProject({
+      db,
+      migrations: [M.slowAudit],
+      tenants: [
+        { id: 'alpha', schema: 'tenant_alpha' },
+        { id: 'beta', schema: 'tenant_beta' },
+        { id: 'gamma', schema: 'tenant_gamma' },
+      ],
+    });
+    const before = process.listenerCount('SIGTERM');
+    const running = cli(['run', '--all', '--json', '--config', p.config]);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const { rows } = await db.client.query(`SELECT 1 FROM pg_stat_activity WHERE datname = $1 AND state = 'active' AND query LIKE '%pg_sleep(1.2)%' AND pid <> pg_backend_pid()`, [db.name]);
+      if (rows.length) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    process.emit('SIGTERM');
+    const r = await running;
+
+    expect(r.code).toBe(EXIT.INTERRUPTED);
+    expect(r.stderr).toContain('Received SIGTERM');
+    const report = JSON.parse(r.stdout);
+    expect(report.interrupted).toBe(true);
+    expect(report.tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'not-started', 'not-started']);
+    expect(process.listenerCount('SIGTERM')).toBe(before); // handlers are removed once the run is over
+    expect(await advisoryLocksHeld(db)).toEqual([]);
+  });
 });

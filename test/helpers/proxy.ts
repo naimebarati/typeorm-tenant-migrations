@@ -12,7 +12,7 @@ export interface PgProxy {
  * which is exactly what a connection pooler that doesn't support startup options does to
  * `-c search_path=...`: the client believes the parameter was applied and the server never saw it.
  */
-export async function startPgProxy(target: { host: string; port: number }, opts: { stripOptions: boolean }): Promise<PgProxy> {
+export async function startPgProxy(target: { host: string; port: number }, opts: { stripOptions?: boolean; stripReadOnly?: boolean }): Promise<PgProxy> {
   const sockets = new Set<net.Socket>();
   let cut = false;
 
@@ -37,7 +37,7 @@ export async function startPgProxy(target: { host: string; port: number }, opts:
       buffered = Buffer.concat([buffered, chunk]);
       if (buffered.length < 4 || buffered.length < buffered.readInt32BE(0)) return;
       started = true;
-      upstream.write(opts.stripOptions ? stripOptionsParam(buffered) : buffered);
+      upstream.write(rewriteStartup(buffered, opts));
       buffered = Buffer.alloc(0);
     });
     upstream.on('data', (chunk: Buffer) => client.write(chunk));
@@ -59,14 +59,24 @@ export async function startPgProxy(target: { host: string; port: number }, opts:
   };
 }
 
-function stripOptionsParam(packet: Buffer): Buffer {
+function rewriteStartup(packet: Buffer, opts: { stripOptions?: boolean; stripReadOnly?: boolean }): Buffer {
+  if (!opts.stripOptions && !opts.stripReadOnly) return packet;
+  return rewriteOptionsParam(packet, (value) => (opts.stripOptions ? undefined : value.replace(/\s*-c default_transaction_read_only=on/, '').trim()));
+}
+
+/** `rewrite` receives the current `options` value and returns the new one, or undefined to drop the parameter. */
+function rewriteOptionsParam(packet: Buffer, rewrite: (value: string) => string | undefined): Buffer {
   const length = packet.readInt32BE(0);
   const protocol = packet.readInt32BE(4);
   if (protocol !== 196608) return packet; // not a v3 StartupMessage (e.g. SSLRequest): leave untouched
   const parts = packet.subarray(8, length - 1).toString('utf8').split('\0');
   const kept: string[] = [];
   for (let i = 0; i + 1 < parts.length; i += 2) {
-    if (parts[i] === 'options') continue;
+    if (parts[i] === 'options') {
+      const next = rewrite(parts[i + 1]!);
+      if (next) kept.push('options', next);
+      continue;
+    }
     kept.push(parts[i]!, parts[i + 1]!);
   }
   const body = Buffer.from(kept.join('\0') + '\0\0', 'utf8');

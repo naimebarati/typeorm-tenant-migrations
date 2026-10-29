@@ -1,5 +1,6 @@
 export { TenantMigrationRunner } from './runner/tenant-migration-runner.js';
 export type {
+  RunParams,
   TargetParams,
   TenantInspectionReport,
   TenantPlanEntry,

@@ -18,6 +18,8 @@ export const EXIT = {
   USAGE: 2,
   /** Some tenant could not get its lock in time (and nothing failed otherwise). */
   LOCKED: 3,
+  /** `run` was stopped by SIGINT/SIGTERM; tenants that had not started were left untouched. */
+  INTERRUPTED: 130,
   /** Unexpected internal error. */
   INTERNAL: 70,
 } as const;
@@ -50,7 +52,8 @@ Options:
   -h, --help             Show this help.
   -v, --version          Show the version.
 
-Exit codes: 0 ok · 1 a tenant failed / not started · 2 usage or configuration error · 3 lock timeout · 70 internal error
+Exit codes: 0 ok · 1 a tenant failed / not started · 2 usage or configuration error · 3 lock timeout · 70 internal error · 130 interrupted
+SIGINT/SIGTERM during "run": finish the tenants already running, start no new ones, print the report. A second signal aborts immediately.
 `;
 
 function packageVersion(): string {
@@ -63,6 +66,36 @@ function packageVersion(): string {
 
 function usageError(message: string): never {
   throw new TenantMigrationError('INVALID_CONFIGURATION', message);
+}
+
+/**
+ * First SIGINT/SIGTERM: ask the runner to stop gracefully. Second: give up and let the default
+ * action terminate the process; PostgreSQL rolls back whatever transaction was open.
+ */
+function listenForInterrupt(controller: AbortController, io: CliIo): () => void {
+  let received = 0;
+  const handlers = new Map<NodeJS.Signals, () => void>();
+  const stop = () => {
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+    handlers.clear();
+  };
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    const handler = () => {
+      received++;
+      if (received === 1) {
+        io.stderr.write(
+          `Received ${signal}: finishing the tenants already running and starting no new ones. Send it again to abort immediately.\n`,
+        );
+        controller.abort();
+      } else {
+        stop();
+        process.kill(process.pid, signal);
+      }
+    };
+    handlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+  return stop;
 }
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
@@ -139,8 +172,16 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       return report.summary.failed > 0 ? EXIT.TENANT_FAILED : EXIT.OK;
     }
 
-    const report = await runner.run({ target });
+    const controller = new AbortController();
+    const stopListening = listenForInterrupt(controller, io);
+    let report;
+    try {
+      report = await runner.run({ target, signal: controller.signal });
+    } finally {
+      stopListening();
+    }
     io.stdout.write(`${json ? JSON.stringify(report, null, 2) : formatRun(report)}\n`);
+    if (report.interrupted) return EXIT.INTERRUPTED;
     if (isCleanReport(report)) return EXIT.OK;
     return report.summary.failed > 0 || report.summary.locked === 0 ? EXIT.TENANT_FAILED : EXIT.LOCKED;
   } catch (error) {

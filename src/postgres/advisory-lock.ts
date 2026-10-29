@@ -36,6 +36,38 @@ export interface AcquireOptions {
   timeoutMs: number;
   logger?: Pick<TenantMigrationLogger, 'warn'>;
   redact?: (text: string) => string;
+  /** Stops waiting for the lock (not a lock already held) when aborted. */
+  signal?: AbortSignal;
+}
+
+/**
+ * A session lock only excludes others if the connection that took it stays the same session. Behind
+ * a pooler in transaction mode it doesn't: the server session is handed to other clients, and
+ * advisory locks are re-entrant within a session, so a second client "acquires" the same lock.
+ *
+ * Prove exclusivity instead of assuming it: from a *second* connection, trying the same key must
+ * fail while the first connection holds it. Any success means the lock is not exclusive on this
+ * connection path and the run must not proceed.
+ */
+async function assertLockIsExclusive(base: PostgresOptions, key: string, schema: string, redact?: (text: string) => string): Promise<void> {
+  const probe = await initializeOwned(buildLockDataSourceOptions(base), redact);
+  try {
+    const runner = probe.createQueryRunner();
+    try {
+      const rows = (await runner.query('SELECT pg_try_advisory_lock($1::bigint) AS locked', [key])) as Array<{ locked: boolean }>;
+      if (rows[0]?.locked === true) {
+        await runner.query('SELECT pg_advisory_unlock($1::bigint)', [key]).catch(() => undefined);
+        throw new TenantMigrationError(
+          'UNSUPPORTED_CONNECTION_MODE',
+          `The advisory lock for schema "${schema}" is not exclusive on this connection path (a connection pooler in transaction mode?). Connect directly or use session pooling. Refusing to run.`,
+        );
+      }
+    } finally {
+      await runner.release().catch(() => undefined);
+    }
+  } finally {
+    await destroyQuietly(probe);
+  }
 }
 
 const INITIAL_BACKOFF_MS = 25;
@@ -57,6 +89,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 export async function acquireAdvisoryLock(base: PostgresOptions, opts: AcquireOptions): Promise<AdvisoryLock> {
   const dataSource = await initializeOwned(buildLockDataSourceOptions(base), opts.redact);
   let queryRunner: QueryRunner | undefined;
+  let key: string | undefined;
+  let held = false;
 
   const cleanup = async () => {
     if (queryRunner && !queryRunner.isReleased) await queryRunner.release().catch(() => undefined);
@@ -67,14 +101,20 @@ export async function acquireAdvisoryLock(base: PostgresOptions, opts: AcquireOp
     queryRunner = dataSource.createQueryRunner();
     await queryRunner.connect();
 
-    const key = computeLockKey(await currentDatabase(queryRunner), opts.schema).toString();
+    key = computeLockKey(await currentDatabase(queryRunner), opts.schema).toString();
     const deadline = Date.now() + opts.timeoutMs;
     let backoff = INITIAL_BACKOFF_MS;
 
     for (;;) {
       const rows = (await queryRunner.query('SELECT pg_try_advisory_lock($1::bigint) AS locked', [key])) as Array<{ locked: boolean }>;
-      if (rows[0]?.locked === true) break;
+      if (rows[0]?.locked === true) {
+        held = true;
+        break;
+      }
 
+      if (opts.signal?.aborted) {
+        throw new TenantMigrationError('CONCURRENT_MIGRATION', `Interrupted while waiting for the lock for schema "${opts.schema}".`);
+      }
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
         throw new TenantMigrationError(
@@ -85,6 +125,8 @@ export async function acquireAdvisoryLock(base: PostgresOptions, opts: AcquireOp
       await sleep(Math.min(backoff, remaining));
       backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
     }
+
+    await assertLockIsExclusive(base, key, opts.schema, opts.redact);
 
     const runner = queryRunner;
     let released = false;
@@ -106,6 +148,11 @@ export async function acquireAdvisoryLock(base: PostgresOptions, opts: AcquireOp
       },
     };
   } catch (error) {
+    // Ending our connection normally ends the session and drops the lock. Behind a pooler it may not
+    // (the server session is kept and reused), so give the lock back explicitly before leaving.
+    if (held && key && queryRunner && !queryRunner.isReleased) {
+      await queryRunner.query('SELECT pg_advisory_unlock($1::bigint)', [key]).catch(() => undefined);
+    }
     await cleanup();
     throw error;
   }

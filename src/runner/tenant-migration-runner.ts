@@ -16,6 +16,15 @@ export interface TargetParams {
   target: TenantSelection;
 }
 
+export interface RunParams extends TargetParams {
+  /**
+   * Graceful stop. When aborted, no further tenant is started (they are reported `not-started`),
+   * a tenant waiting for its lock gives up, and tenants already migrating run to completion:
+   * a migration is never cancelled midway. The report carries `interrupted: true`.
+   */
+  signal?: AbortSignal;
+}
+
 export interface TenantPlanEntry {
   tenantId: string;
   schema: string;
@@ -105,10 +114,12 @@ export class TenantMigrationRunner {
    * Migrates the selected tenants. Configuration and selection errors throw; everything that
    * happens per tenant is reported, never thrown.
    */
-  async run(params: TargetParams): Promise<TenantMigrationRunReport> {
+  async run(params: RunParams): Promise<TenantMigrationRunReport> {
     const runId = randomUUID();
     const startedAt = new Date().toISOString();
     const { continueOnError, concurrency } = this.ctx.options;
+    const signal = params?.signal;
+    const aborted = () => signal?.aborted === true;
     const targets = await this.selectTargets(params);
     const results = new Array<TenantMigrationResult | undefined>(targets.length).fill(undefined);
     const log = this.ctx.logger;
@@ -117,7 +128,7 @@ export class TenantMigrationRunner {
     // 1. Preflight, read-only, for the whole batch: a missing schema or a broken migration list
     //    stops everything before the first change (unless continueOnError was explicitly chosen).
     let preflightFailed = false;
-    const inspections = await this.inspectAll(targets, () => !continueOnError && preflightFailed, (i) => {
+    const inspections = await this.inspectAll(targets, () => aborted() || (!continueOnError && preflightFailed), (i) => {
       if (i.status === 'failed') preflightFailed = true;
     });
     const runnable: number[] = [];
@@ -133,17 +144,17 @@ export class TenantMigrationRunner {
     });
 
     // 2. Execute, unless preflight failed and the caller hasn't asked to continue past failures.
-    if (!(preflightFailed && !continueOnError)) {
+    if (!(preflightFailed && !continueOnError) && !aborted()) {
       let failure = false;
       await runPool(
         runnable,
         concurrency,
         async (index) => {
-          const result = await executeTenant(this.ctx, targets[index]!);
+          const result = await executeTenant(this.ctx, targets[index]!, signal);
           results[index] = result;
           if (result.status === 'failed' || result.status === 'locked') failure = true;
         },
-        () => !continueOnError && failure,
+        () => aborted() || (!continueOnError && failure),
       );
     }
 
@@ -153,6 +164,7 @@ export class TenantMigrationRunner {
       startedAt,
       finishedAt: new Date().toISOString(),
       summary: summarize(tenants),
+      ...(aborted() ? { interrupted: true as const } : {}),
       tenants,
     };
     log.info(`Run ${runId} finished: ${JSON.stringify(report.summary)}`);

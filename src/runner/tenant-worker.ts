@@ -82,7 +82,7 @@ export async function inspectTenant(ctx: RunnerContext, target: TenantMigrationT
     dataSource = await initializeOwned(tenantOptions(ctx, target.schema, true), ctx.redact);
     const ds = dataSource;
     const executed = await withQueryRunner(ds, async (queryRunner) => {
-      await assertSchemaContext(queryRunner, target.schema, searchPathFor(ctx, target.schema));
+      await assertSchemaContext(queryRunner, target.schema, searchPathFor(ctx, target.schema), { readOnly: true });
       return readExecutedMigrations(queryRunner, target.schema, ctx.historyTable);
     });
     const known = discoverMigrations(ds);
@@ -124,7 +124,7 @@ function namesAdded(before: readonly ExecutedMigration[] | undefined, after: rea
  * lock* (that's the authoritative pending list), run, read history again. Cleanup runs in
  * `finally` in the opposite order, ending with the lock session.
  */
-export async function executeTenant(ctx: RunnerContext, target: TenantMigrationTarget): Promise<TenantMigrationResult> {
+export async function executeTenant(ctx: RunnerContext, target: TenantMigrationTarget, signal?: AbortSignal): Promise<TenantMigrationResult> {
   const startedAtMs = Date.now();
   const result: TenantMigrationResult = {
     tenantId: target.id,
@@ -140,6 +140,11 @@ export async function executeTenant(ctx: RunnerContext, target: TenantMigrationT
   let lock: AdvisoryLock | undefined;
   let before: ExecutedMigration[] | undefined;
   let migrationStarted = false;
+  let neverStarted = false;
+
+  if (signal?.aborted) {
+    return { ...result, status: 'not-started', startedAt: undefined };
+  }
 
   try {
     dataSource = await initializeOwned(tenantOptions(ctx, target.schema, false), ctx.redact);
@@ -151,6 +156,7 @@ export async function executeTenant(ctx: RunnerContext, target: TenantMigrationT
       timeoutMs: ctx.options.lockTimeoutMs,
       logger: ctx.logger,
       redact: ctx.redact,
+      signal,
     });
 
     const known = discoverMigrations(ds);
@@ -176,6 +182,14 @@ export async function executeTenant(ctx: RunnerContext, target: TenantMigrationT
     result.error = describeError(ctx, error, fallback);
     result.status = result.error.code === 'CONCURRENT_MIGRATION' ? 'locked' : 'failed';
 
+    if (signal?.aborted && !migrationStarted && result.error.code === 'CONCURRENT_MIGRATION') {
+      // Interrupted while still waiting for the lock: this tenant was never touched.
+      neverStarted = true;
+      result.status = 'not-started';
+      result.error = undefined;
+      return result;
+    }
+
     if (migrationStarted) {
       // What did commit before the failure? Only the history table can say; if we can't read it, say so.
       try {
@@ -191,8 +205,12 @@ export async function executeTenant(ctx: RunnerContext, target: TenantMigrationT
   } finally {
     await destroyQuietly(dataSource);
     await lock?.release();
-    const finishedAtMs = Date.now();
-    result.finishedAt = new Date(finishedAtMs).toISOString();
-    result.durationMs = finishedAtMs - startedAtMs;
+    if (neverStarted) {
+      result.startedAt = undefined;
+    } else {
+      const finishedAtMs = Date.now();
+      result.finishedAt = new Date(finishedAtMs).toISOString();
+      result.durationMs = finishedAtMs - startedAtMs;
+    }
   }
 }

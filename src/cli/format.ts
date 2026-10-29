@@ -18,6 +18,7 @@ export function formatRun(report: TenantMigrationRunReport): string {
     }
     if (t.error) lines.push(`    ${t.error.code}: ${t.error.message}`);
   }
+  if (report.interrupted) lines.push('Interrupted: tenants that had not started were left untouched (NOT RUN).');
   const s = report.summary;
   lines.push(`Summary: ${s.total} tenant(s) — ${s.success} migrated, ${s.skipped} up to date, ${s.failed} failed, ${s.locked} locked, ${s.notStarted} not started`);
   return lines.join('\n');

@@ -34,6 +34,8 @@ export interface TenantMigrationRunReport {
   startedAt: string;
   finishedAt: string;
   summary: TenantMigrationRunSummary;
+  /** Present (true) only when the run was stopped through its AbortSignal: tenants not yet started are `not-started`. */
+  interrupted?: true;
   tenants: TenantMigrationResult[];
 }
 
@@ -52,7 +54,7 @@ export function summarize(results: readonly TenantMigrationResult[]): TenantMigr
 }
 
 /** A run is clean when nothing failed, was locked out, or was left unstarted. 'skipped' = already up to date. */
-export function isCleanReport(report: Pick<TenantMigrationRunReport, 'summary'>): boolean {
+export function isCleanReport(report: Pick<TenantMigrationRunReport, 'summary' | 'interrupted'>): boolean {
   const s = report.summary;
-  return s.failed === 0 && s.locked === 0 && s.notStarted === 0;
+  return !report.interrupted && s.failed === 0 && s.locked === 0 && s.notStarted === 0;
 }
