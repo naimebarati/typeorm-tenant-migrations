@@ -11,6 +11,9 @@ What is guaranteed, how, and which test pins it. If a row has no test, it isn't 
 | Schemas are never created | no `CREATE SCHEMA` anywhere; missing schema ⇒ `SCHEMA_NOT_FOUND` | `runner.test.ts` |
 | `plan`/`status` write nothing | no TypeORM helper that creates the table; read-only startup parameter makes PostgreSQL reject writes | `runner.test.ts` (whole-database snapshots), `schema-isolation.test.ts` |
 | One migrator per tenant | session advisory lock, bounded wait, fail closed | `advisory-lock.test.ts`, `runner-concurrency.test.ts`, `cli.test.ts` (two OS processes) |
+| Lock is really exclusive on this connection path | after locking, a second connection must fail to take the same key; otherwise `UNSUPPORTED_CONNECTION_MODE` and explicit unlock | `pgbouncer.test.ts` (real PgBouncer, transaction pooling) |
+| Read-only inspection is really read-only | `default_transaction_read_only` startup parameter, and a check that it took effect | `schema-isolation.test.ts`, `pgbouncer.test.ts` |
+| Interrupted run leaves nothing half-done | graceful stop; PostgreSQL rolls back an open transaction when the client dies | `cli-interrupt.test.ts` (real SIGKILL / SIGINT / SIGTERM), `runner-abort.test.ts` |
 | Lock never outlives the run | dedicated 1-connection DataSource destroyed in `finally`; crashed holder's lock dies with its session | `advisory-lock.test.ts`, `runner.test.ts`, `runner-failure.test.ts` |
 | No leaked connections | every DataSource/QueryRunner the runner opens is released in `finally` | `waitForNoSessions` assertions throughout |
 | Caller's DataSource untouched | options copied (incl. `extra`), instance never initialized/destroyed | `runner.test.ts`, `tenant-data-source-options.test.ts` |
@@ -22,7 +25,8 @@ What is guaranteed, how, and which test pins it. If a row has no test, it isn't 
 * A migration that changes its own `search_path`, or schema-qualifies another tenant's objects.
 * Atomicity across tenants.
 * `transaction: 'none'` and non-transactional statements leave partial state on failure (demonstrated in `runner-failure.test.ts`).
-* Poolers in transaction mode (advisory session locks).
+* Poolers in transaction mode: detected and refused, not supported.
+* Non-transactional statements interrupted by a second signal or `SIGKILL`.
 * Anything that connects without going through this runner.
 
 ## Operating checklist

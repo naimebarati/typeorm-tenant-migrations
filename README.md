@@ -152,6 +152,7 @@ TypeScript configs: if [`tsx`](https://tsx.is) is resolvable from the working di
 | `1` | At least one tenant failed (migration, connection, missing schema, …) or was not started because another failed. `plan`/`status`: a tenant could not be inspected. |
 | `2` | Usage / configuration / tenant-selection error. Nothing was executed. |
 | `3` | At least one tenant could not get its lock in time, and nothing failed otherwise. |
+| `130` | `run` was interrupted by `SIGINT`/`SIGTERM`; tenants that had not started were left untouched (see [Interruption](#interruption)). |
 | `70` | Unexpected internal error. |
 
 ### Example output
@@ -234,6 +235,12 @@ Default `'tenant-only'`: `search_path` is exactly the tenant schema. An unqualif
 
 If you set `extra.options` on your DataSource, the runner appends its own `-c search_path=…` to it. A `search_path` already present in `extra.options`, in a `url` / `extra.connectionString` `options=` parameter, or an `options` parameter in the URL is a configuration **error**, not something to merge. Tenant schema names must match `^[a-z_][a-z0-9_]*$` (max 63 chars); `public`, `information_schema`, `pg_*` are never accepted as a tenant schema.
 
+## Interruption
+
+* **Programmatic:** `runner.run({ target, signal })` takes an `AbortSignal`. When it aborts, no further tenant is started (they are reported `not-started`), a tenant that is only *waiting* for its lock gives up at once, and tenants already migrating **run to completion** — a migration is never cancelled midway. The report then has `interrupted: true` and is never "clean".
+* **CLI:** the first `SIGINT`/`SIGTERM` during `run` does exactly that, prints the report and exits `130`. A second signal terminates the process immediately; if a transaction was open, PostgreSQL rolls it back when it notices the client is gone. `SIGKILL` (cannot be handled) behaves like that second signal.
+* Tested with real signals sent to the real binary in the middle of a migration: after `SIGKILL` or a double `SIGINT`, the transaction is rolled back, the lock and the sessions are gone, and the same command completes on the next run. A migration that is not transactional (`transaction: 'none'`, `CREATE INDEX CONCURRENTLY`, …) gets no rollback in any of these cases; that is the reason the first signal waits instead of killing.
+
 ## Failure behavior
 
 * **Preflight.** Before the first change, `run` inspects *every* selected tenant read-only: schema exists, `search_path` is right, migrations load. If any tenant fails that, nothing is migrated (default) and the rest are reported `not-started`. With `continueOnError`, healthy tenants still run and the broken one is reported `failed`. A DataSource that loads **zero** migrations is a failure (a mistyped glob must not look like success).
@@ -242,9 +249,22 @@ If you set `extra.options` on your DataSource, the runner appends its own `-c se
 * **No automatic retry, no automatic rollback.**
 * **Resume.** Fix the cause and run again. Tenants that are up to date are `skipped`; a partially migrated tenant continues from the first migration without a history record. Recorded migrations are never repeated.
 
-Common causes: `SCHEMA_NOT_FOUND` (create the schema), `SCHEMA_CONTEXT_MISMATCH` (see below), `CONCURRENT_MIGRATION` (another deploy is running — wait, or check `pg_locks`/`pg_stat_activity` for a stuck holder; a dead session's lock is released by PostgreSQL), `MIGRATION_FAILED` (the sanitized database error is in the report).
+Common causes: `SCHEMA_NOT_FOUND` (create the schema), `SCHEMA_CONTEXT_MISMATCH` (see below), `UNSUPPORTED_CONNECTION_MODE` (the advisory lock is not exclusive on this connection path, see [Connection poolers](#connection-poolers)), `CONCURRENT_MIGRATION` (another deploy is running — wait, or check `pg_locks`/`pg_stat_activity` for a stuck holder; a dead session's lock is released by PostgreSQL), `MIGRATION_FAILED` (the sanitized database error is in the report).
 
-`SCHEMA_CONTEXT_MISMATCH` means a connection did not come up with the requested `search_path`. The classic cause is a connection pooler that does not forward the `options` startup parameter (check your pooler's startup-parameter settings). The runner detects this and refuses to run; this behavior is tested with a TCP proxy that strips the parameter.
+`SCHEMA_CONTEXT_MISMATCH` means a connection did not come up with the requested `search_path`. The classic cause is a connection pooler that does not forward the `options` startup parameter. The runner detects this and refuses to run; this is tested with a TCP proxy that strips the parameter and with a real PgBouncer. `plan`/`status` additionally verify that their `default_transaction_read_only` startup parameter took effect, and refuse otherwise.
+
+### Connection poolers
+
+Tested with **PgBouncer 1.22.0** (the build in Ubuntu 24.04), connecting the runner through it:
+
+| PgBouncer setup | What happens | Safe? |
+| --- | --- | --- |
+| default | PgBouncer itself rejects `options=-c search_path=…` (`unsupported startup parameter`). Runner: `DATASOURCE_INITIALIZATION_FAILED`. | yes, nothing runs |
+| `ignore_startup_parameters = options` (session or transaction pooling) | The parameter is silently dropped. Runner: `SCHEMA_CONTEXT_MISMATCH`. | yes, nothing runs |
+| `track_extra_parameters` including `search_path` and `default_transaction_read_only` | PgBouncer 1.22 accepts but does not apply them. Runner: `SCHEMA_CONTEXT_MISMATCH`. A PgBouncer that does apply them would pass, and the tests assert isolation in that case too. | yes |
+| transaction pooling, lock only | A session advisory lock is **not exclusive** here (a second client re-enters the same server session's lock). The runner proves exclusivity with a second connection after taking the lock and fails with `UNSUPPORTED_CONNECTION_MODE`. | yes, refused |
+
+In short: **connect the migration runner directly to PostgreSQL** (or through a TCP-level proxy), not through PgBouncer. Using PgBouncer for the application and a direct connection for deploys is the normal setup anyway.
 
 ## Security notes
 
@@ -256,7 +276,7 @@ Common causes: `SCHEMA_NOT_FOUND` (create the schema), `SCHEMA_CONTEXT_MISMATCH`
 ## Known limitations
 
 * PostgreSQL only (driver type `postgres`). Not CockroachDB, not the `aurora-postgres` driver type, no `replication` (read replicas) configuration — the latter is rejected.
-* **Connection poolers.** Per-tenant `search_path` relies on the `options` startup parameter being forwarded. If it isn't, the runner fails closed (`SCHEMA_CONTEXT_MISMATCH`). The advisory lock is session-level, so it needs a direct connection or *session* pooling; transaction-pooling modes are unsupported and untested.
+* **Connection poolers.** Per-tenant `search_path` relies on the `options` startup parameter being forwarded. If it isn't, the runner fails closed (`SCHEMA_CONTEXT_MISMATCH`). The advisory lock is session-level, so it needs a direct connection or *session* pooling; transaction pooling is unsupported (the runner detects that the lock is not exclusive and refuses). See [Connection poolers](#connection-poolers).
 * No cross-tenant atomicity; no `down`/rollback command (use TypeORM's CLI per tenant if you must); no drift detection; no schema/tenant discovery or creation; no run-at-startup helper.
 * The runner governs the connection context *before* your migrations. A migration that itself runs `SET search_path` (or schema-qualifies other tenants' names) can still do whatever it likes.
 * Pending migrations are determined with TypeORM's rule — by **name**, not by timestamp order — so a migration with an older timestamp than the newest executed one still runs. `plan`'s independent implementation of that rule is checked against what `run` really executes in the tests, on every TypeORM version in the matrix.
@@ -284,16 +304,16 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
-### Local runs with exact versions (255 tests each)
+### Local runs with exact versions (274 tests each)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
-| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
-| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
-| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 255 / 255 pass |
-| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 255 / 255 pass |
-| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 255 / 255 pass |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
+| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 274 / 274 pass |
+| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 274 / 274 pass |
 
 `pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18, Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
 
@@ -308,7 +328,7 @@ scripts/test-matrix.sh        # the TypeORM version matrix, one after another
 scripts/verify-tarball.sh     # pack, install into a clean dir, run the README flow
 ```
 
-`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 98.1 / 96.2 / 95.0 / 99.1). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary.
+`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 97.2 / 95.9 / 93.2 / 98.6). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary. Tests that need a real PgBouncer are skipped when no `pgbouncer` binary is found (`TTM_PGBOUNCER_BIN` overrides the lookup); locally and in CI one is installed so they run.
 
 Every integration file creates (and drops) its own database. More in [CONTRIBUTING.md](CONTRIBUTING.md). Architecture notes: [`docs/architecture.md`](docs/architecture.md).
 

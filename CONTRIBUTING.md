@@ -11,6 +11,8 @@ export TTM_TEST_PG_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
 
 The role in `TTM_TEST_PG_URL` must be a superuser (tests create and drop databases and throwaway roles, including a `SUPERUSER` one to prove secrets are scrubbed). Each integration file creates its own database and drops it afterwards.
 
+Optional: install `pgbouncer` (or set `TTM_PGBOUNCER_BIN`) so `pgbouncer.test.ts` runs instead of being skipped. The tests start their own PgBouncer on a free port (as the `postgres` user when run as root, since PgBouncer refuses to run as root).
+
 ## Checks
 
 ```bash

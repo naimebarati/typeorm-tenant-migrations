@@ -63,6 +63,8 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Install PgBouncer (its tests are skipped without it)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq pgbouncer
       - name: Select TypeORM / pg versions under test
         run: |
           npm install --no-save --no-audit --no-fund "typeorm@${{ matrix.typeorm }}"

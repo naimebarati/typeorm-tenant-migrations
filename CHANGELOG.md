@@ -10,4 +10,7 @@ First alpha. Not production-hardened; see "Known limitations" in the README.
 * Read-only `plan`/`status` (PostgreSQL-enforced read-only connections).
 * Bounded concurrency (default 1), transaction modes `each` (default) / `all` / `none`, fail-fast or `continueOnError`.
 * JSON reports, documented exit codes, secret redaction.
+* New error code `UNSUPPORTED_CONNECTION_MODE`: after taking a tenant's advisory lock the runner proves from a second connection that the lock is exclusive, and refuses otherwise (transaction pooling). The lock is released explicitly on that path, because behind a pooler closing the connection does not end the server session.
+* `plan`/`status`/preflight verify that `default_transaction_read_only` took effect on the connection, instead of assuming a pooler forwarded it.
+* Graceful interruption: `run({ signal })` and, in the CLI, the first `SIGINT`/`SIGTERM` finish the tenants already running, start no new ones and print the report (`interrupted: true`, exit code `130`); a second signal aborts immediately.
 * `dataSource: null` now fails with `INVALID_CONFIGURATION` instead of a raw `TypeError`; the CLI logger honors the `io.stderr` stream it is given.

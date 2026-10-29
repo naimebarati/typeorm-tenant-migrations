@@ -44,8 +44,13 @@ TypeORM's `schema` option qualifies names TypeORM generates; it does not set `se
 
 * Key: first 8 bytes (big-endian, signed) of `sha256("typeorm-tenant-migrations:<database>:<schema>")`, passed as a `bigint` bind parameter. Pinned by a unit test: it is a compatibility contract between runner versions.
 * One DataSource with a pool of exactly **one** connection per tenant run. The lock therefore lives in a session nobody else can borrow, can't deadlock with the migration pool, and **destroying the DataSource ends the session**, which makes PostgreSQL drop the lock even if `pg_advisory_unlock` itself failed.
-* `pg_try_advisory_lock` in a loop with capped exponential backoff (25 ms → 500 ms) until `lockTimeoutMs`. No unbounded blocking.
+* `pg_try_advisory_lock` in a loop with capped exponential backoff (25 ms → 500 ms) until `lockTimeoutMs`. No unbounded blocking. The wait also ends immediately when the run's `AbortSignal` fires.
+* **Exclusivity is proven, not assumed.** Right after taking the lock, a *second* connection tries the same key; it must fail. If it succeeds, the connection path does not preserve sessions (a pooler in transaction mode), the lock is released explicitly and the tenant fails with `UNSUPPORTED_CONNECTION_MODE`. The explicit unlock matters: behind such a pooler, ending our connection does not end the server session, so the lock would otherwise stay held on the pooler's pooled connection.
 * A killed session or a crashed process releases the lock server-side (tested with `pg_terminate_backend`).
+
+## Interruption
+
+`run` takes an `AbortSignal`. The pools check it before starting each tenant and `executeTenant` checks it again on entry (two independent guards; tests only fail if both are removed). A tenant that is already inside `runMigrations` is never cancelled. The CLI maps the first `SIGINT`/`SIGTERM` to `abort()` and the second to the default signal action.
 
 ## Why not `MigrationExecutor`
 
