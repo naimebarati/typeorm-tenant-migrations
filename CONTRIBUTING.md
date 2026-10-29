@@ -22,6 +22,7 @@ npm test                      # builds dist/ first (CLI tests run the built bina
 npm run coverage              # same suite + coverage gate (see vitest.config.mts)
 scripts/test-matrix.sh [versions...]   # default: 0.3.20 0.3.31 1.0.0 1.1.2
 scripts/verify-tarball.sh [typeorm-range]
+node scripts/load-test.mjs --tenants 300     # load test; builds dist/ first, so it never measures a stale build
 npm pack --dry-run
 ```
 

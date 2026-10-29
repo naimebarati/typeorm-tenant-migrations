@@ -14,7 +14,7 @@ export const APPLICATION_NAME = 'typeorm-tenant-migrations';
  * package's redaction, so TypeORM's own logger is replaced with one that says nothing. Results
  * and sanitized errors are reported through the report and the configured logger instead.
  */
-const silentTypeOrmLogger: Logger = {
+export const silentTypeOrmLogger: Logger = {
   logQuery() {},
   logQueryError() {},
   logQuerySlow() {},

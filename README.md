@@ -353,6 +353,35 @@ The run found and fixed Windows problems that Linux could not show: `tsImport` n
 
 `pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12, PostgreSQL 18 on macOS/Windows, Node other than 20/22/24 (Node 20/24 only on Linux), other architectures, TLS and PgBouncer on macOS/Windows, graceful interruption by signal on Windows, connection poolers other than PgBouncer 1.22.
 
+## Performance and limits
+
+Measured with [`scripts/load-test.mjs`](scripts/load-test.mjs) on one machine (4 cores, 16 GB, Node 22.22, PostgreSQL 16.15 with default settings on the **same** host, `max_connections` 100). Every tenant has 5 tables and 2 000 rows in `orders`; each run applies 3 migrations per tenant (add a column with a default, create an index on it, create a table). Treat the absolute numbers as an indication for *this* setup, not as a promise: your migrations, hardware and network dominate real timings. After every phase the script checks that each tenant has exactly the expected history, that no advisory lock is held and that no session of the run is left.
+
+| Phase | 300 tenants | 1 000 tenants |
+| --- | --- | --- |
+| `plan`, concurrency 1 | 5.9 s (19.5 ms/tenant) | 17.3 s (17.3 ms/tenant) |
+| `plan`, concurrency 8 | 2.5 s | 6.9 s |
+| `run`, concurrency 1 | 32.1 s (107 ms/tenant) | not measured |
+| `run`, concurrency 2 | 18.0 s | not measured |
+| `run`, concurrency 4 | 12.2 s (40.5 ms/tenant) | 40.6 s (40.6 ms/tenant) |
+| `run`, concurrency 8 | 9.2 s (30.6 ms/tenant) | 33.8 s (33.8 ms/tenant) |
+| `run`, concurrency 16 | 9.5 s (no faster than 8) | not measured |
+| `run`, everything up to date | 2.3 s | 6.8 s |
+
+* **Linear in the number of tenants.** At concurrency 4: 40.5 ms/tenant for 300 tenants, 40.6 ms/tenant for 1 000.
+* **Concurrency helps up to a point.** 107 → 60 → 40 → 31 ms/tenant for 1, 2, 4, 8; 16 was no better, because on this machine the CPU is shared with PostgreSQL. The right value is the one your database can absorb without hurting the application, which is why the default is 1.
+* **Preflight comes first.** `run` inspects every selected tenant read-only before the first change (that is the `plan`-like cost above), so with 1 000 tenants at concurrency 8 the first migration starts after about 7 s.
+* **Connections.** The peak number of connections this package had open at once was 1 for `plan` at concurrency 1, and for `run`: 3 (concurrency 1), 6 (2), 10–11 (4), 20–21 (8), 42 (16). Plan for up to **3 × concurrency + 1** (the tenant's connection, the lock connection, and for a moment the connection that proves the lock exclusive). Before a run with concurrency above 1 the runner reads `max_connections` and the connections in use, and logs a warning if that bound does not fit (`concurrency N can need up to M connections, but only K are free …`). It does not refuse to run.
+* **When the connections do run out** (concurrency 41 on `max_connections` 100, 1 000 tenants): 962 tenants succeeded and 38 failed with `DATASOURCE_INITIALIZATION_FAILED` ("too many clients"); nothing was left open or locked, and re-running at concurrency 4 completed the remaining 38. The other side of this is real, though: **while a run is using the slots, your application can get "too many clients" as well.** Keep `concurrency × 3` well below the free connections, or run during a quiet period.
+* **Memory.** Process RSS stayed between about 100 and 114 MB across nine phases and roughly 9 000 tenant operations (the first 30 MB are warm-up); no growth trend, no leak at this scale.
+* **Failures at scale.** With every tenth tenant poisoned and `continueOnError`, the 100 failing tenants were reported individually (with what had and had not been applied), the other 900 were migrated, and no resources were left behind.
+
+A scaled-down version of this (60 tenants at concurrency 1, 4 and 8, plus failure and warning cases) runs with every `npm test`, so a connection or resource leak shows up in CI; the script did flag exactly such a leak (97 connections held open) when it once ran against a stale build that still contained a deliberately introduced one.
+
+```bash
+node scripts/load-test.mjs --tenants 300 --concurrency 1,2,4,8,16      # builds dist/ first; needs TTM_TEST_PG_URL (a superuser)
+```
+
 ## Contributing
 
 ```bash

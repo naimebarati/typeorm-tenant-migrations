@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TenantMigrationError } from '../../src/errors/index.js';
 import {
+  silentTypeOrmLogger,
   buildLockDataSourceOptions,
   buildTenantDataSourceOptions,
   collectSecrets,
@@ -129,5 +130,26 @@ describe('collectSecrets', () => {
   it('gathers password, URL and URL password', () => {
     const s = collectSecrets(base({ password: 'a-pass', url: 'postgres://u:url%20pw@h/d', extra: { password: 'x-pass' } }));
     expect(s).toEqual(expect.arrayContaining(['a-pass', 'postgres://u:url%20pw@h/d', 'url pw', 'url%20pw', 'x-pass']));
+  });
+});
+
+describe('silentTypeOrmLogger', () => {
+  it('implements every TypeORM Logger method and prints nothing, whatever it is given', () => {
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      silentTypeOrmLogger.logQuery('SELECT secret', ['p']);
+      silentTypeOrmLogger.logQueryError('boom', 'SELECT secret', ['p']);
+      silentTypeOrmLogger.logQuerySlow(5000, 'SELECT secret', ['p']);
+      silentTypeOrmLogger.logSchemaBuild('schema');
+      silentTypeOrmLogger.logMigration('Migration X failed, error: postgres://u:p@h/d');
+      silentTypeOrmLogger.log('warn', 'message');
+      expect(out).not.toHaveBeenCalled();
+      expect(err).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

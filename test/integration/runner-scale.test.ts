@@ -155,4 +155,17 @@ describe('connection budget warning', () => {
     }
     expect(logger.lines.filter((l) => l.startsWith('WARN'))).toEqual([]);
   });
+
+  it('an unreachable database does not make the budget check throw: the run reports the usual per-tenant error, without warnings', async () => {
+    const logger = capturingLogger();
+    const report = await makeRunner({
+      db,
+      migrations: phaseMigrations('Unreachable'),
+      tenants: tenants.slice(0, 2),
+      options: { concurrency: 4, logger },
+      base: { password: 'definitely-the-wrong-password' },
+    }).run({ target: { all: true } });
+    expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'DATASOURCE_INITIALIZATION_FAILED' } });
+    expect(logger.lines.filter((l) => l.startsWith('WARN'))).toEqual([]);
+  });
 });
