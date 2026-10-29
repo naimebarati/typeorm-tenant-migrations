@@ -163,7 +163,7 @@ export function buildLockDataSourceOptions(base: PostgresOptions): PostgresOptio
  * mistake for connection problems, so say what to do.
  */
 const MODULE_LOADING_ERROR =
-  /TypeScript|strip-only|ERR_UNKNOWN_FILE_EXTENSION|Unknown file extension|\.ts\b|Cannot use import statement|require is not defined|module is not defined|exports is not defined|ERR_REQUIRE_ESM/i;
+  /TypeScript|strip-only|ERR_UNKNOWN_FILE_EXTENSION|Unknown file extension|\.ts\b|Cannot use import statement|require is not defined|module is not defined|exports is not defined|ERR_REQUIRE_ESM|Unexpected token|Unexpected identifier|Unexpected strict mode reserved word/i;
 function moduleLoadingHint(message: string): string {
   return MODULE_LOADING_ERROR.test(message)
     ? ' (Hint: this looks like a migration file Node could not load. Point "migrations" at compiled JavaScript, or use TypeScript Node can strip, and keep CommonJS and ES modules consistent.)'
