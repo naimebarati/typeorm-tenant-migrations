@@ -136,6 +136,8 @@ describe.skipIf(!bin)('advisory lock through PgBouncer', () => {
   });
 
   it('control (no pooler): the lock is exclusive and the check does not leave sessions behind', async () => {
+    // Sessions of the poolers started by earlier tests close a moment after those poolers are killed.
+    expect(await waitForNoSessions(db, 5000)).toBe(0);
     const first = await acquireAdvisoryLock(target(), { schema: 'tenant_alpha', timeoutMs: 1000 });
     expect(await db.countOtherSessions()).toBe(1);
     await first.release();

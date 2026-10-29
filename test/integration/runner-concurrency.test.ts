@@ -99,20 +99,29 @@ describe('concurrency across independent schemas', () => {
     (await db.client.query('SELECT tenant, extract(epoch FROM started) s, extract(epoch FROM finished) f FROM public.progress ORDER BY started')).rows.map(
       (r) => ({ tenant: r.tenant as string, s: Number(r.s), f: Number(r.f) }),
     );
-  const maxOverlap = (rows: Array<{ s: number; f: number }>) =>
-    Math.max(...rows.map((a) => rows.filter((b) => b.s < a.f && a.s < b.f).length));
+  /** Most intervals open at the same instant (sweep line). Counting pairwise overlaps instead would report 3 for A[0,.8] B[.1,.9] C[.85,1.6]. */
+  const maxSimultaneous = (rows: Array<{ s: number; f: number }>) => {
+    const events = rows.flatMap((r) => [[r.s, 1], [r.f, -1]] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let open = 0;
+    let max = 0;
+    for (const [, delta] of events) {
+      open += delta;
+      max = Math.max(max, open);
+    }
+    return max;
+  };
 
   it('concurrency 1 (default) never overlaps tenants', async () => {
     await makeRunner({ db, migrations: [Timed], tenants: [ALPHA, BETA, GAMMA] }).run({ target: ALL });
     const rows = await spans();
     expect(rows).toHaveLength(3);
-    expect(maxOverlap(rows)).toBe(1);
+    expect(maxSimultaneous(rows)).toBe(1);
   });
 
   it('concurrency 2 runs two tenants at a time and no more', async () => {
     const report = await makeRunner({ db, migrations: [Timed], tenants: [ALPHA, BETA, GAMMA], options: { concurrency: 2 } }).run({ target: ALL });
     expect(report.summary.success).toBe(3);
-    expect(maxOverlap(await spans())).toBe(2);
+    expect(maxSimultaneous(await spans())).toBe(2);
     expect(await waitForNoSessions(db)).toBe(0);
   });
 
