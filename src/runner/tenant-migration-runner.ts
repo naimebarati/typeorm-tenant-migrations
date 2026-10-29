@@ -3,6 +3,7 @@ import { validateOptions, validateTableName } from '../config/validate-config.js
 import type { ResolvedOptions, TenantMigrationRunnerConfig, TenantMigrationTarget, TenantProvider, TenantSelection } from '../config/types.js';
 import { TenantMigrationError } from '../errors/index.js';
 import { createRedactor } from '../errors/sanitize.js';
+import { warnIfConnectionBudgetIsTight } from '../postgres/connection-budget.js';
 import { buildTenantDataSourceOptions, collectSecrets, resolveBaseOptions } from '../postgres/create-tenant-data-source.js';
 import { resolveTenants } from '../tenants/tenant-provider.js';
 import { selectTargets } from '../tenants/select-targets.js';
@@ -124,6 +125,8 @@ export class TenantMigrationRunner {
     const results = new Array<TenantMigrationResult | undefined>(targets.length).fill(undefined);
     const log = this.ctx.logger;
     log.info(`Run ${runId}: ${targets.length} tenant(s), concurrency ${concurrency}, transaction '${this.ctx.options.transaction}'.`);
+
+    await warnIfConnectionBudgetIsTight(this.ctx.base, concurrency, log, this.ctx.redact);
 
     // 1. Preflight, read-only, for the whole batch: a missing schema or a broken migration list
     //    stops everything before the first change (unless continueOnError was explicitly chosen).
