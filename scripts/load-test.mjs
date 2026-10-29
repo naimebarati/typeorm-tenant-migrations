@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 // Load test: many tenant schemas, several `concurrency` levels.
 //
-//   node scripts/load-test.mjs --tenants 200 --concurrency 1,2,4,8 [--rows 2000] [--tables 5] [--json out.json]
+//   node scripts/load-test.mjs --tenants 200 --concurrency 1,2,4,8 [--rows 2000] [--tables 5] [--json out.json] [--no-build]
 //
-// Needs a built dist/ (npm run build) and a PostgreSQL reachable through TTM_TEST_PG_URL
+// Builds dist/ first (skip with --no-build). Needs a PostgreSQL reachable through TTM_TEST_PG_URL
 // (default postgres://postgres:postgres@127.0.0.1:5432/postgres; the role must be allowed to create databases).
 //
 // For every phase it records wall time, the peak number of connections this package had open at the same
 // time (sampled from pg_stat_activity every 10 ms), the process's RSS growth, and it verifies the database
 // afterwards: every tenant has exactly the expected history, no advisory lock is left, no session is left.
 // It exits non-zero if any verification fails.
+import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -18,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Always measure the code in src/: a stale dist/ (for example left over from a mutation experiment) would be measured otherwise.
+if (!process.argv.includes('--no-build')) execSync('npm run build --silent', { cwd: root, stdio: 'inherit' });
 const { TenantMigrationRunner } = require(path.join(root, 'dist', 'index.js'));
 const { Client } = require('pg');
 
