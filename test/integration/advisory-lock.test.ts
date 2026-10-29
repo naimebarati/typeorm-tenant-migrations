@@ -3,7 +3,7 @@ import { computeLockKey } from '../../src/postgres/advisory-lock.js';
 import { acquireAdvisoryLock } from '../../src/postgres/advisory-lock.js';
 import type { PostgresOptions } from '../../src/postgres/create-tenant-data-source.js';
 import type { TestDatabase } from '../helpers/pg.js';
-import { createTestDatabase, requirePasswordAuth } from '../helpers/pg.js';
+import { createTestDatabase, requirePasswordAuth, waitForNoSessions, waitForSessionCount } from '../helpers/pg.js';
 
 let db: TestDatabase;
 let base: PostgresOptions;
@@ -36,12 +36,12 @@ describe('acquireAdvisoryLock', () => {
     const lock = await acquireAdvisoryLock(base, { schema: 'tenant_alpha', timeoutMs: 1000 });
     expect(lock.key).toBe(computeLockKey(db.name, 'tenant_alpha').toString());
     expect(await advisoryLocksHeld()).toEqual([lock.key]);
-    expect(await db.countOtherSessions()).toBe(1);
+    expect(await waitForSessionCount(db, 1)).toBe(1);
 
     await lock.release();
     expect(await advisoryLocksHeld()).toEqual([]);
     await settle();
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
   });
 
   it('release is idempotent', async () => {
@@ -64,7 +64,7 @@ describe('acquireAdvisoryLock', () => {
     }
     // The loser left nothing behind, and the winner's lock was untouched until it released.
     await settle();
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
     expect(await advisoryLocksHeld()).toEqual([]);
   });
 
@@ -115,7 +115,7 @@ describe('acquireAdvisoryLock', () => {
     // Releasing the dead handle must not throw nor leave sessions.
     await expect(first.release()).resolves.toBeUndefined();
     await settle();
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
   });
 
   it('leaves no session behind when it cannot connect', async () => {
@@ -123,6 +123,6 @@ describe('acquireAdvisoryLock', () => {
     expect(err).toMatchObject({ code: 'DATASOURCE_INITIALIZATION_FAILED' });
     expect((err as Error).message).not.toContain('definitely-wrong-password');
     await settle();
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
   });
 });

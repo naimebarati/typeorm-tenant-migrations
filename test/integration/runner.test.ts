@@ -177,14 +177,14 @@ describe('preflight', () => {
       await expect(runner.plan({ target: ALL })).rejects.toMatchObject({ code: 'UNSAFE_SCHEMA_NAME' });
     }
     expect(await snapshotDatabase(db.client)).toEqual(before);
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
   });
 
   it('refuses an unknown tenant id and a missing selection before connecting', async () => {
     const runner = makeRunner({ db, migrations: goodMigrations });
     await expect(runner.run({ target: { tenants: ['nope'] } })).rejects.toMatchObject({ code: 'INVALID_TENANT_TARGET' });
     await expect(runner.run({} as never)).rejects.toMatchObject({ code: 'INVALID_TENANT_TARGET' });
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
   });
 
   it('fails when the app has no migrations loaded (a mistyped glob must not look like success)', async () => {

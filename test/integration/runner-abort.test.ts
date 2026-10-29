@@ -42,7 +42,7 @@ describe('run({ signal })', () => {
     expect(statuses(report)).toEqual(['not-started', 'not-started', 'not-started']);
     expect(report.interrupted).toBe(true);
     expect(await snapshotDatabase(db.client)).toEqual(before);
-    expect(await db.countOtherSessions()).toBe(0);
+    expect(await waitForNoSessions(db)).toBe(0);
   });
 
   it('abort while the first tenant is migrating: it completes, the rest are not started', async () => {

@@ -13,7 +13,7 @@ import { seedTenants } from '../helpers/fixtures.js';
 import type { PgBouncer, PgBouncerOptions } from '../helpers/pgbouncer.js';
 import { findPgBouncer, pgBouncerVersion, startPgBouncer } from '../helpers/pgbouncer.js';
 import type { TestDatabase } from '../helpers/pg.js';
-import { columnsOf, createTestDatabase, snapshotDatabase, tablesOf, waitForNoSessions } from '../helpers/pg.js';
+import { columnsOf, createTestDatabase, snapshotDatabase, tablesOf, waitForNoSessions, waitForSessionCount } from '../helpers/pg.js';
 import { ALL, ALPHA, BETA, makeRunner } from '../helpers/runner.js';
 
 const bin = findPgBouncer();
@@ -139,7 +139,7 @@ describe.skipIf(!bin)('advisory lock through PgBouncer', () => {
     // Sessions of the poolers started by earlier tests close a moment after those poolers are killed.
     expect(await waitForNoSessions(db, 5000)).toBe(0);
     const first = await acquireAdvisoryLock(target(), { schema: 'tenant_alpha', timeoutMs: 1000 });
-    expect(await db.countOtherSessions()).toBe(1);
+    expect(await waitForSessionCount(db, 1)).toBe(1);
     await first.release();
     expect(await waitForNoSessions(db)).toBe(0);
   });

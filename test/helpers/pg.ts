@@ -110,16 +110,21 @@ export async function tablesOf(client: Client, schema: string): Promise<string[]
   return rows.map((r) => r.table_name);
 }
 
-/** pg_stat_activity lags a hair behind a closed socket; wait for the database to be quiet. */
-export async function waitForNoSessions(db: TestDatabase, timeoutMs = 2000): Promise<number> {
+/**
+ * pg_stat_activity lags a hair behind a closed socket (the backend exits a moment after the client
+ * disconnects), so "exactly N sessions" can only be asserted by waiting for N. Returns the last count seen.
+ */
+export async function waitForSessionCount(db: TestDatabase, expected: number, timeoutMs = 3000): Promise<number> {
   const deadline = Date.now() + timeoutMs;
   let n = await db.countOtherSessions();
-  while (n > 0 && Date.now() < deadline) {
+  while (n !== expected && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 25));
     n = await db.countOtherSessions();
   }
   return n;
 }
+
+export const waitForNoSessions = (db: TestDatabase, timeoutMs = 3000) => waitForSessionCount(db, 0, timeoutMs);
 
 export async function advisoryLocksHeld(db: TestDatabase): Promise<string[]> {
   const { rows } = await db.client.query(
