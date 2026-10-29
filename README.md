@@ -225,7 +225,14 @@ Passed straight to TypeORM's `runMigrations({ transaction })`:
 
 None of these make a *batch across tenants* atomic: PostgreSQL cannot commit one migration atomically on many schemas. Some tenants may be migrated while others are not; that is exactly what the report and the resume behavior are for.
 
-**Non-transactional migrations** (`transaction = false`, `CREATE INDEX CONCURRENTLY`, `VACUUM`, …) can fail with partial physical state. No tool can make retrying that safe automatically; inspect the tenant, fix it, then re-run.
+**Non-transactional migrations** (`transaction = false`, `CREATE INDEX CONCURRENTLY`, `VACUUM`, …) can fail with partial physical state. No tool can make retrying that safe automatically; inspect the tenant, fix it, then re-run. What is tested, against real PostgreSQL:
+
+* A migration with `transaction = false` that runs `CREATE INDEX CONCURRENTLY` works in the default `each` mode, also for several tenants at once (`concurrency: 2`); the index lands in the tenant schema only.
+* The same statement in a migration that did *not* opt out fails with PostgreSQL's "cannot run inside a transaction block"; nothing is recorded. In `all` mode TypeORM refuses such a migration before running anything.
+* A non-transactional migration that fails halfway keeps what it already did. Example from the tests: statement 1 creates a table, statement 2 `CREATE UNIQUE INDEX CONCURRENTLY` hits duplicate data. Result: the migration is `failed`, **nothing is recorded in the history, the table stays, and PostgreSQL leaves an INVALID index behind**. Running again does *not* repair it: the migration starts over, hits "already exists", and fails again; `plan` keeps listing it as pending. After you drop the leftovers and fix the data, the same command succeeds and records it once. Other tenants in a `continueOnError` batch are unaffected.
+* `transaction: 'none'` does not roll back a failing migration's earlier statements either (the contrast with `each` is tested).
+
+Practical rule: keep non-transactional migrations to a single statement each, so a failure has nothing to leave behind except that statement's own residue (for example an invalid index you drop and recreate).
 
 ### `search_path` policy
 
@@ -266,6 +273,17 @@ Tested with **PgBouncer 1.22.0** (the build in Ubuntu 24.04), connecting the run
 
 In short: **connect the migration runner directly to PostgreSQL** (or through a TCP-level proxy), not through PgBouncer. Using PgBouncer for the application and a direct connection for deploys is the normal setup anyway.
 
+## TLS
+
+`ssl`, `url` (`sslmode=…`) and `extra` from your DataSource are inherited by **every** connection this package opens: the tenant pool, the lock connection, the lock-exclusivity probe and the read-only inspection connections. The tests prove it by sampling `pg_stat_ssl` for all sessions of the run (a control run without `ssl` shows plaintext sessions, so the check can tell the difference), for `ssl: { … }` and for a URL with `sslmode=no-verify`.
+
+Certificate verification itself is done by `pg` and Node, not by this package, and it is not relaxed: with an explicit CA that did not sign the server certificate, nothing runs and the report shows the TLS error (without credentials). Two things worth knowing from the test runs:
+
+* In `pg` 8.23.1 `sslmode=require` in a URL means full verification (`verify-full`) and prints a deprecation warning about future libpq semantics; use an explicit `sslmode` or an `ssl` object.
+* Hostname checking differs between `pg` versions inside the supported range. Against a server whose certificate has no matching name for the IP address in `host`, `pg` 8.23.1 refused `rejectUnauthorized: true`, while 8.5.1 and 8.11.5 connected (the 8.23.1 failure was an IP/altname mismatch, so the chain itself had been accepted in that environment). If you rely on hostname verification, pin it yourself with `ssl.ca` and a `checkServerIdentity` of your own, or use a recent `pg`.
+
+TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock docker images do not). CI turns it on in a dedicated `tls` job with a self-signed certificate and sets `TTM_REQUIRE_SSL=1`, which turns "server has no TLS" into a failure instead of a silent skip.
+
 ## Security notes
 
 * Schema names go through a strict allowlist before they are used in SQL or connection options; the history table name too. Existence checks use bound parameters. See [`docs/safety.md`](docs/safety.md).
@@ -304,18 +322,18 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
-### Local runs with exact versions (274 tests each)
+### Local runs with exact versions (289 tests each)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
-| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
-| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
-| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 274 / 274 pass |
-| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 274 / 274 pass |
-| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 274 / 274 pass |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
+| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 289 / 289 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 289 / 289 pass |
+| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 289 / 289 pass |
 
-`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18, Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
+`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL other than 16 and 18 (the TLS tests ran locally on 16 and are in a separate CI job), Node other than 20/22/24, non-Linux platforms, connection poolers in transaction mode.
 
 ## Contributing
 
