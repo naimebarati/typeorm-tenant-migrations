@@ -340,16 +340,16 @@ The run found and fixed Windows problems that Linux could not show: `tsImport` n
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:16` / `postgres:18` images and `setup-node` major versions; the exact patch versions were not recorded from the job logs. The test jobs install PgBouncer and run with `TTM_REQUIRE_PGBOUNCER=1`, so the PgBouncer tests cannot be skipped silently; a separate `tls` job turns TLS on in the PostgreSQL service and runs the TLS tests with `TTM_REQUIRE_SSL=1`. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
-### Local runs with exact versions (301 tests each)
+### Local runs with exact versions (314 tests each)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
-| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
-| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
-| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 301 / 301 pass |
-| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 301 / 301 pass |
-| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 301 / 301 pass |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
+| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 314 / 314 pass |
+| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 314 / 314 pass |
 
 `pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12, PostgreSQL 18 on macOS/Windows, Node other than 20/22/24 (Node 20/24 only on Linux), other architectures, TLS and PgBouncer on macOS/Windows, graceful interruption by signal on Windows, connection poolers other than PgBouncer 1.22.
 
@@ -393,7 +393,7 @@ scripts/test-matrix.sh        # the TypeORM version matrix, one after another
 scripts/verify-tarball.sh     # pack, install into a clean dir, run the README flow
 ```
 
-`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 96.9 / 94.8 / 93.3 / 98.3). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary. Tests that need a real PgBouncer are skipped when no `pgbouncer` binary is found (`TTM_PGBOUNCER_BIN` overrides the lookup); locally and in CI one is installed so they run.
+`npm run coverage` runs the whole suite with V8 coverage and enforces minimum thresholds (statements 96 %, branches 94 %, functions 93 %, lines 98 %; measured: 96.8 / 94.7 / 94.2 / 98.4). The thresholds are a ratchet: raise them when coverage rises. What is still uncovered are defensive fallbacks that need fault injection to reach (for example `QueryRunner#release()` itself failing, or the history table becoming unreadable right after a *successful* run). The two-line `bin.ts` entry point is excluded; it is exercised through the real spawned binary. Tests that need a real PgBouncer are skipped when no `pgbouncer` binary is found (`TTM_PGBOUNCER_BIN` overrides the lookup); locally and in CI one is installed so they run.
 
 Every integration file creates (and drops) its own database. More in [CONTRIBUTING.md](CONTRIBUTING.md). Architecture notes: [`docs/architecture.md`](docs/architecture.md).
 
