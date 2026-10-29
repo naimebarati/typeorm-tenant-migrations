@@ -49,6 +49,12 @@ async function pooler(options: PgBouncerOptions): Promise<PgBouncer> {
 const IGNORE_OPTIONS = ['ignore_startup_parameters = options'];
 const TRACK_EVERYTHING = ['track_extra_parameters = IntervalStyle, search_path, default_transaction_read_only'];
 
+describe('PgBouncer availability', () => {
+  it('is installed when TTM_REQUIRE_PGBOUNCER is set (CI sets it, so these tests cannot be skipped by accident)', () => {
+    if (process.env.TTM_REQUIRE_PGBOUNCER) expect(bin).toBeDefined();
+  });
+});
+
 describe.skipIf(!bin)('tenant migrations through PgBouncer', () => {
   it('default config: PgBouncer itself rejects the search_path startup option, so nothing runs', async () => {
     const p = await pooler({ poolMode: 'session' });
