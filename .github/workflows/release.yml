@@ -80,8 +80,10 @@ jobs:
           echo "dist-tag: $TAG"
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
       - name: npm needs to correct nothing in package.json
-        # npm 11 drops a `bin` path written as "./dist/..." from the registry metadata ("auto-corrected ... invalid and
-        # removed") and still reports success, which would break `npx`. Any such correction fails the release.
+        # npm 11 corrects package.json on the fly while publishing (it once dropped a `bin` written as "./dist/..." with
+        # "auto-corrected ... invalid and removed") and still reports success. In 0.1.0-alpha.2 the registry kept the bin
+        # anyway and npx worked, so the damage was never shown; but a release should not depend on silent corrections.
+        # Any correction fails the release before the real publish.
         run: |
           set -o pipefail
           npm publish --dry-run --access public --tag "${{ steps.tag.outputs.name }}" 2>&1 | tee publish-dry-run.log
