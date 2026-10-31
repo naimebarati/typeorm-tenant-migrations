@@ -30,7 +30,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "typeorm-tenant-migrations": "./dist/cli/bin.js"
+    "typeorm-tenant-migrations": "dist/cli/bin.js"
   },
   "files": [
     "dist",
