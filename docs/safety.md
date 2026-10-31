@@ -26,6 +26,7 @@ What is guaranteed, how, and which test pins it. If a row has no test, it isn't 
 * Atomicity across tenants.
 * `transaction: 'none'` and non-transactional statements leave partial state on failure (demonstrated in `runner-failure.test.ts`).
 * Poolers in transaction mode: detected and refused, not supported.
+* A pooler that reports success but leaves a connection in the default `search_path`: PgBouncer 1.26.1 in session pooling in front of PostgreSQL 16 does that to the second client that reuses a server connection (measured with `scripts/probe-pgbouncer.mjs`, see the README). The runner's live check covers the connection it verified; a migration that opens another pooled connection of its own is not covered. Connect the runner directly to PostgreSQL.
 * Non-transactional statements interrupted by a second signal or `SIGKILL`.
 * Anything that connects without going through this runner.
 * **Data in database error messages.** A failing migration's message is reported after credentials and URLs are redacted, nothing more. PostgreSQL puts the offending value into some messages: a failed cast reports `invalid input syntax for type integer: "forty-two"`, and that string is tenant data. The `detail` field (which carries the full key of a unique violation) is not included: a duplicate-key error reports the constraint name only. Both were checked with real failing migrations; other error kinds were not enumerated. Treat the report and the CI log of a failed run like the data it came from.

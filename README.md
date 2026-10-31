@@ -272,18 +272,19 @@ Measured with **PgBouncer 1.22.0** (the build in Ubuntu 24.04) and re-run unchan
 | --- | --- | --- |
 | default | PgBouncer itself rejects `options=-c search_path=…` (`unsupported startup parameter`). Runner: `DATASOURCE_INITIALIZATION_FAILED`. | yes, nothing runs |
 | `ignore_startup_parameters = options` (session or transaction pooling) | The parameter is silently dropped. Runner: `SCHEMA_CONTEXT_MISMATCH`. | yes, nothing runs |
-| `track_extra_parameters` including `search_path` and `default_transaction_read_only` | PgBouncer 1.22 applies `default_transaction_read_only` but **not** `search_path` (measured with `scripts/probe-pgbouncer.mjs`: the client still sees `"$user", public`). Runner: `SCHEMA_CONTEXT_MISMATCH`. A PgBouncer that does apply them would pass, and the tests assert isolation in that case too. | yes |
+| `track_extra_parameters` including `search_path` and `default_transaction_read_only` | `default_transaction_read_only` is applied. `search_path` is **not** applied in front of PostgreSQL 16 (1.22.0 and 1.25.1) and **is** applied in front of PostgreSQL 18 (1.25.1; 1.22.0 was not measured against 18), see below. Where it is not applied: runner `SCHEMA_CONTEXT_MISMATCH`. Where it is, the tests assert isolation exactly as for a direct connection. | yes |
 | transaction pooling, lock only | A session advisory lock is **not exclusive** here (a second client re-enters the same server session's lock). The runner proves exclusivity with a second connection after taking the lock and fails with `UNSUPPORTED_CONNECTION_MODE`. | yes, refused |
 
-**PgBouncer 1.26.1** (Homebrew, the macOS CI jobs) behaves differently, and differently depending on the PostgreSQL major behind it. First tenant of the run, same tests, same PgBouncer:
+**PgBouncer 1.26.1** (Homebrew; the macOS CI jobs, and a probe on Linux) behaves differently, and what it does depends on the PostgreSQL major behind it. [`scripts/probe-pgbouncer.mjs`](scripts/probe-pgbouncer.mjs) (run by hand through the *PgBouncer probe* workflow) connects with the same `pg` driver, sends `options=-c search_path=… -c default_transaction_read_only=on` twice in a row, and prints what each connection ends up with. Same result on macOS and on Linux, 1.26.1 built by Homebrew in both:
 
-| PgBouncer 1.26.1 setup | in front of PostgreSQL 16 | in front of PostgreSQL 18 |
+| PgBouncer 1.26.1, session pooling | in front of PostgreSQL 16 | in front of PostgreSQL 18 |
 | --- | --- | --- |
-| default | failed, `SCHEMA_CONTEXT_MISMATCH` | **success** |
-| `ignore_startup_parameters = options`, session pooling | failed, `SCHEMA_CONTEXT_MISMATCH` | **success** |
-| `ignore_startup_parameters = options`, transaction pooling | failed, `SCHEMA_CONTEXT_MISMATCH` | failed, `UNSUPPORTED_CONNECTION_MODE` |
+| default, or `ignore_startup_parameters = options`, or `track_extra_parameters` | 1st connection: `search_path` as requested. **2nd connection: `"$user", public`, no error.** | both connections as requested |
+| transaction pooling | both as requested | both as requested |
 
-In every one of these six cases the safety invariant held: a tenant had the migrated column if and only if its run succeeded, `public` and the other tenant were untouched, and `plan`/`status` wrote nothing (the tests check that). A `success` can only happen after the runner's live check found the tenant's `search_path` in effect on the connection, so in those cases PgBouncer 1.26.1 did forward the startup parameter. **Why the outcome depends on the PostgreSQL version behind the pooler is not understood**, and from 1.26 on the tests therefore pin only the invariant, not the error codes.
+So 1.26.1 parses `options` and applies it (even with `ignore_startup_parameters = options`, which dropped it up to 1.25), but in front of PostgreSQL 16 a connection that reuses a server connection can silently end up in the **default** `search_path` while PgBouncer reports success. Its log shows `S: param: search_path = …` lines in front of PostgreSQL 18 and none in front of 16, which fits this reading (an inference, not something the probe observes): PostgreSQL 18 reports `search_path` changes to the client, PgBouncer keeps its cache in step with them, and in front of 16 its cache goes stale after the reset between two clients. The same reporting would also explain why 1.25.1 applies a *tracked* `search_path` in front of PostgreSQL 18 only.
+
+What the runner does about it: its live check of `search_path` and `current_schema()` refused all three runs of the macOS job in front of PostgreSQL 16 (`SCHEMA_CONTEXT_MISMATCH`), and in the six CI cases against 1.26.1 (macOS, PostgreSQL 16 and 18) no tenant was migrated in the wrong schema, `public` was untouched and `plan`/`status` wrote nothing. The check covers the connection the runner verified, though: a migration that opens *another* pooled connection of its own (for example through `queryRunner.connection` or an `EntityManager`) would not be covered when the pooler can silently hand out the default `search_path`. That is one more reason for the advice below.
 
 In short: **connect the migration runner directly to PostgreSQL** (or through a TCP-level proxy), not through PgBouncer. Using PgBouncer for the application and a direct connection for deploys is the normal setup anyway.
 
