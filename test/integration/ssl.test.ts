@@ -94,16 +94,17 @@ describe('TLS (each test is skipped when the server has ssl = off)', () => {
       await seedTenants(db, tenants.map((t) => t.schema));
       const runner = makeRunner({ db, migrations: goodMigrations, tenants, base: { ssl: { rejectUnauthorized: false }, applicationName: app } });
       // One plan + status takes about 200 ms and the inspection connections live for a few milliseconds each, so a
-      // single pass is observed only 5-9 times, and once (CI, run 25) not at all. Keep inspecting for about a second
-      // and a half so that "TLS was observed" does not depend on the sampler's timing.
-      const until = Date.now() + 1500;
+      // single pass is observed only 5-9 times, and once (CI, run 25) not at all. Keep inspecting for 2.5 s so that
+      // "TLS was observed" does not depend on the sampler's timing. Sessions seen in 1.5 s: 39-48 on Linux, 6 and 16
+      // on the two Windows runners, so the minimum below is a small number of that, not a Linux-sized one.
+      const until = Date.now() + 2500;
       const seen = await sampleSsl(app, async () => {
         do {
           expect((await runner.plan({ target: ALL })).summary.failed).toBe(0);
           expect((await runner.status({ target: ALL })).summary.failed).toBe(0);
         } while (Date.now() < until);
       });
-      expect(seen.length).toBeGreaterThanOrEqual(20);
+      expect(seen.length).toBeGreaterThanOrEqual(5);
       expect(seen.every((ssl) => ssl === true)).toBe(true);
     }),
   );

@@ -17,6 +17,16 @@ import { columnsOf, createTestDatabase, snapshotDatabase, tablesOf, waitForNoSes
 import { ALL, ALPHA, BETA, makeRunner } from '../helpers/runner.js';
 
 const bin = findPgBouncer();
+/**
+ * What the two characterization tests below assert exactly was measured with PgBouncer 1.22.0 and 1.25.1. PgBouncer 1.26.1
+ * (Homebrew, macOS CI) behaves differently in ways that were first seen in CI, so from 1.26 on those tests only assert the
+ * safety invariant and log the branch that happened. See "Connection poolers" in the README.
+ */
+const measuredPooler = (() => {
+  if (!bin) return true;
+  const m = /(\d+)\.(\d+)/.exec(pgBouncerVersion(bin));
+  return !m || Number(m[1]) < 1 || (Number(m[1]) === 1 && Number(m[2]) < 26);
+})();
 const sessions: PgBouncer[] = [];
 let db: TestDatabase;
 
@@ -46,6 +56,16 @@ async function pooler(options: PgBouncerOptions): Promise<PgBouncer> {
   return p;
 }
 
+/** Holds behind any pooler, whatever its version does: a tenant has the migrated column iff its run succeeded; `public` is untouched. */
+async function expectNoWrongSchema(tenants: ReadonlyArray<{ schema: string; status: string }>): Promise<void> {
+  for (const t of tenants) {
+    const columns = await columnsOf(db.client, t.schema, 'orders');
+    if (t.status === 'success') expect(columns).toContain('status');
+    else expect(columns).toEqual(['id']);
+  }
+  expect(await columnsOf(db.client, 'public', 'orders')).toEqual(['id']);
+}
+
 const IGNORE_OPTIONS = ['ignore_startup_parameters = options'];
 const TRACK_EVERYTHING = ['track_extra_parameters = IntervalStyle, search_path, default_transaction_read_only'];
 
@@ -61,9 +81,15 @@ describe.skipIf(!bin)('tenant migrations through PgBouncer', () => {
     const before = await snapshotDatabase(db.client);
     const report = await makeRunner({ db, migrations: goodMigrations, base: { port: p.port } }).run({ target: ALL });
 
-    expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'DATASOURCE_INITIALIZATION_FAILED' } });
-    expect(report.tenants[0]!.error!.message).toMatch(/unsupported startup parameter/);
-    expect(await snapshotDatabase(db.client)).toEqual(before);
+    if (measuredPooler) {
+      expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'DATASOURCE_INITIALIZATION_FAILED' } });
+      expect(report.tenants[0]!.error!.message).toMatch(/unsupported startup parameter/);
+      expect(await snapshotDatabase(db.client)).toEqual(before);
+    } else {
+      const first = report.tenants[0]!;
+      console.info(`[pgbouncer.test] default config, ${pgBouncerVersion(bin!)}: first tenant ${first.status}${first.error ? ` (${first.error.code})` : ''}`);
+      await expectNoWrongSchema(report.tenants);
+    }
   });
 
   it.each(['session', 'transaction'] as const)(
@@ -74,12 +100,23 @@ describe.skipIf(!bin)('tenant migrations through PgBouncer', () => {
       const runner = makeRunner({ db, migrations: goodMigrations, base: { port: p.port } });
 
       const report = await runner.run({ target: ALL });
-      expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'SCHEMA_CONTEXT_MISMATCH' } });
-      expect(report.tenants[1]!.status).toBe('not-started');
+      if (measuredPooler) {
+        expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'SCHEMA_CONTEXT_MISMATCH' } });
+        expect(report.tenants[1]!.status).toBe('not-started');
 
-      const plan = await runner.plan({ target: ALL });
-      expect(plan.tenants.every((t) => t.status === 'failed' && t.error?.code === 'SCHEMA_CONTEXT_MISMATCH')).toBe(true);
-      expect(await snapshotDatabase(db.client)).toEqual(before);
+        const plan = await runner.plan({ target: ALL });
+        expect(plan.tenants.every((t) => t.status === 'failed' && t.error?.code === 'SCHEMA_CONTEXT_MISMATCH')).toBe(true);
+        expect(await snapshotDatabase(db.client)).toEqual(before);
+      } else {
+        const first = report.tenants[0]!;
+        console.info(`[pgbouncer.test] ${poolMode} pooling with ignore_startup_parameters=options, ${pgBouncerVersion(bin!)}: first tenant ${first.status}${first.error ? ` (${first.error.code})` : ''}`);
+        await expectNoWrongSchema(report.tenants);
+        // plan/status must not write, whatever the pooler did with the startup parameters.
+        const afterRun = await snapshotDatabase(db.client);
+        await runner.plan({ target: ALL });
+        await runner.status({ target: ALL });
+        expect(await snapshotDatabase(db.client)).toEqual(afterRun);
+      }
     },
   );
 
