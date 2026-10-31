@@ -272,7 +272,7 @@ Measured with **PgBouncer 1.22.0** (the build in Ubuntu 24.04) and re-run unchan
 | --- | --- | --- |
 | default | PgBouncer itself rejects `options=-c search_path=…` (`unsupported startup parameter`). Runner: `DATASOURCE_INITIALIZATION_FAILED`. | yes, nothing runs |
 | `ignore_startup_parameters = options` (session or transaction pooling) | The parameter is silently dropped. Runner: `SCHEMA_CONTEXT_MISMATCH`. | yes, nothing runs |
-| `track_extra_parameters` including `search_path` and `default_transaction_read_only` | PgBouncer 1.22 accepts but does not apply them. Runner: `SCHEMA_CONTEXT_MISMATCH`. A PgBouncer that does apply them would pass, and the tests assert isolation in that case too. | yes |
+| `track_extra_parameters` including `search_path` and `default_transaction_read_only` | PgBouncer 1.22 applies `default_transaction_read_only` but **not** `search_path` (measured with `scripts/probe-pgbouncer.mjs`: the client still sees `"$user", public`). Runner: `SCHEMA_CONTEXT_MISMATCH`. A PgBouncer that does apply them would pass, and the tests assert isolation in that case too. | yes |
 | transaction pooling, lock only | A session advisory lock is **not exclusive** here (a second client re-enters the same server session's lock). The runner proves exclusivity with a second connection after taking the lock and fails with `UNSUPPORTED_CONNECTION_MODE`. | yes, refused |
 
 **PgBouncer 1.26.1** (Homebrew, the macOS CI jobs) behaves differently, and differently depending on the PostgreSQL major behind it. First tenant of the run, same tests, same PgBouncer:

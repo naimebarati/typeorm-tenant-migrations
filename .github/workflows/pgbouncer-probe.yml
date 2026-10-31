@@ -1,0 +1,91 @@
+name: PgBouncer probe
+
+# Diagnostic, run by hand (Actions > PgBouncer probe > Run workflow). It does not test this package: it asks one question,
+# "what does this PgBouncer do with the `options` startup parameter in front of this PostgreSQL?", and prints the raw answers
+# and PgBouncer's own log. Born from CI run 32, where PgBouncer 1.26.1 behaved differently in front of PostgreSQL 16 and 18.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS, PostgreSQL ${{ matrix.pgmajor }}, PgBouncer from Homebrew
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pgmajor: ['16', '18']
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and start PostgreSQL, install PgBouncer
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install postgresql@${{ matrix.pgmajor }} pgbouncer
+          BIN="$(brew --prefix postgresql@${{ matrix.pgmajor }})/bin"
+          brew services start postgresql@${{ matrix.pgmajor }}
+          for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
+          "$BIN/psql" -h 127.0.0.1 -d postgres -c "CREATE ROLE postgres SUPERUSER LOGIN PASSWORD 'postgres'"
+          DATA="$(brew --prefix)/var/postgresql@${{ matrix.pgmajor }}"
+          sed -i '' -E 's/[[:space:]]trust$/ scram-sha-256/' "$DATA/pg_hba.conf"
+          brew services restart postgresql@${{ matrix.pgmajor }}
+          for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
+          echo "TTM_PGBOUNCER_BIN=$(brew --prefix pgbouncer)/bin/pgbouncer" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Probe
+        run: node scripts/probe-pgbouncer.mjs
+
+  linux:
+    name: Linux, PostgreSQL ${{ matrix.pgmajor }}, PgBouncer from ${{ matrix.source }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pgmajor: '16', source: apt }
+          - { pgmajor: '18', source: apt }
+          - { pgmajor: '16', source: homebrew }
+          - { pgmajor: '18', source: homebrew }
+    services:
+      postgres:
+        image: postgres:${{ matrix.pgmajor }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install PgBouncer (apt)
+        if: matrix.source == 'apt'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq pgbouncer
+          echo "TTM_PGBOUNCER_BIN=/usr/sbin/pgbouncer" >> "$GITHUB_ENV"
+      - name: Install PgBouncer (Homebrew on Linux, the same build line as on macOS)
+        if: matrix.source == 'homebrew'
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install pgbouncer
+          echo "TTM_PGBOUNCER_BIN=$(brew --prefix pgbouncer)/bin/pgbouncer" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Probe
+        run: node scripts/probe-pgbouncer.mjs
