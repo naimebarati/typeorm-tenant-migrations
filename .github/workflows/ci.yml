@@ -173,9 +173,12 @@ jobs:
       matrix:
         include:
           - { os: macos-latest, pgmajor: '16' }
+          - { os: macos-latest, pgmajor: '18' }
           - { os: windows-latest, pgmajor: '16' }
+          - { os: windows-latest, pgmajor: '18' }
     env:
       TTM_TEST_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TTM_REQUIRE_SSL: '1' # every row turns TLS on below, so the TLS tests cannot be skipped by accident
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -200,6 +203,29 @@ jobs:
           brew services restart postgresql@${{ matrix.pgmajor }}
           for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
           PGPASSWORD=postgres "$BIN/psql" -h 127.0.0.1 -U postgres -d postgres -tAc "select 'password auth ok'"
+      - name: Turn TLS on (macOS, self-signed certificate)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$(brew --prefix postgresql@${{ matrix.pgmajor }})/bin"
+          DATA="$(brew --prefix)/var/postgresql@${{ matrix.pgmajor }}"
+          openssl req -new -x509 -days 2 -nodes -subj "/CN=localhost" -out "$DATA/server.crt" -keyout "$DATA/server.key"
+          chmod 600 "$DATA/server.key"
+          echo "ssl = on" >> "$DATA/postgresql.conf"
+          brew services restart postgresql@${{ matrix.pgmajor }}
+          for i in $(seq 1 30); do "$BIN/pg_isready" -h 127.0.0.1 && break; sleep 2; done
+          test "$(PGPASSWORD=postgres "$BIN/psql" -h 127.0.0.1 -U postgres -d postgres -tAc 'SHOW ssl')" = "on"
+      - name: Install PgBouncer (macOS; its tests cannot be skipped silently)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install pgbouncer
+          PGB="$(brew --prefix pgbouncer)/bin/pgbouncer"
+          "$PGB" --version
+          echo "TTM_PGBOUNCER_BIN=$PGB" >> "$GITHUB_ENV"
+          echo "TTM_REQUIRE_PGBOUNCER=1" >> "$GITHUB_ENV"
       - name: Install and start PostgreSQL (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -215,6 +241,50 @@ jobs:
           if (-not $installed) { throw "PostgreSQL ${{ matrix.pgmajor }} could not be installed with Chocolatey after 3 attempts" }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
           for ($i = 0; $i -lt 30; $i++) { & "$bin\pg_isready.exe" -h 127.0.0.1; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }
+      - name: Turn TLS on (Windows, self-signed certificate)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "C:\Program Files\PostgreSQL\${{ matrix.pgmajor }}\bin"
+          $data = "C:\Program Files\PostgreSQL\${{ matrix.pgmajor }}\data"
+          & "C:\Program Files\Git\usr\bin\openssl.exe" req -new -x509 -days 2 -nodes -subj "/CN=localhost" -out "$data\server.crt" -keyout "$data\server.key"
+          if ($LASTEXITCODE -ne 0) { throw "openssl could not create the certificate" }
+          Add-Content -Path "$data\postgresql.conf" -Value "ssl = on"
+          Restart-Service "postgresql-x64-${{ matrix.pgmajor }}"
+          for ($i = 0; $i -lt 30; $i++) { & "$bin\pg_isready.exe" -h 127.0.0.1; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }
+          $env:PGPASSWORD = "postgres"
+          $ssl = (& "$bin\psql.exe" -h 127.0.0.1 -U postgres -d postgres -tAc "SHOW ssl").Trim()
+          if ($ssl -ne "on") { throw "SHOW ssl returned '$ssl', expected 'on'" }
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  arm64:
+    name: linux arm64 (postgres 16, node 22)
+    runs-on: ubuntu-24.04-arm
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+      TTM_REQUIRE_PGBOUNCER: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install PgBouncer (its tests are skipped without it)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq pgbouncer
       - run: npm run typecheck
       - run: npm test
