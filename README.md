@@ -2,7 +2,7 @@
 
 Run your normal **TypeORM migrations** across a PostgreSQL database that uses **one schema per tenant** — one tenant, a few, or all of them — with the guard rails a multi-tenant deploy needs.
 
-> **Status: `0.1.0-alpha.2`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux, and on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
+> **Status: `0.1.0-alpha.2`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux x64, 16 on Linux arm64, and 16 and 18 on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
 
 ## The problem
 
@@ -266,7 +266,7 @@ Common causes: `SCHEMA_NOT_FOUND` (create the schema), `SCHEMA_CONTEXT_MISMATCH`
 
 ### Connection poolers
 
-Tested with **PgBouncer 1.22.0** (the build in Ubuntu 24.04), connecting the runner through it:
+Measured with **PgBouncer 1.22.0** (the build in Ubuntu 24.04) and re-run unchanged with **1.25.1** (Ubuntu 26.04); the table holds for both. It does **not** describe 1.26.1 (below).
 
 | PgBouncer setup | What happens | Safe? |
 | --- | --- | --- |
@@ -274,6 +274,16 @@ Tested with **PgBouncer 1.22.0** (the build in Ubuntu 24.04), connecting the run
 | `ignore_startup_parameters = options` (session or transaction pooling) | The parameter is silently dropped. Runner: `SCHEMA_CONTEXT_MISMATCH`. | yes, nothing runs |
 | `track_extra_parameters` including `search_path` and `default_transaction_read_only` | PgBouncer 1.22 accepts but does not apply them. Runner: `SCHEMA_CONTEXT_MISMATCH`. A PgBouncer that does apply them would pass, and the tests assert isolation in that case too. | yes |
 | transaction pooling, lock only | A session advisory lock is **not exclusive** here (a second client re-enters the same server session's lock). The runner proves exclusivity with a second connection after taking the lock and fails with `UNSUPPORTED_CONNECTION_MODE`. | yes, refused |
+
+**PgBouncer 1.26.1** (Homebrew, the macOS CI jobs) behaves differently, and differently depending on the PostgreSQL major behind it. First tenant of the run, same tests, same PgBouncer:
+
+| PgBouncer 1.26.1 setup | in front of PostgreSQL 16 | in front of PostgreSQL 18 |
+| --- | --- | --- |
+| default | failed, `SCHEMA_CONTEXT_MISMATCH` | **success** |
+| `ignore_startup_parameters = options`, session pooling | failed, `SCHEMA_CONTEXT_MISMATCH` | **success** |
+| `ignore_startup_parameters = options`, transaction pooling | failed, `SCHEMA_CONTEXT_MISMATCH` | failed, `UNSUPPORTED_CONNECTION_MODE` |
+
+In every one of these six cases the safety invariant held: a tenant had the migrated column if and only if its run succeeded, `public` and the other tenant were untouched, and `plan`/`status` wrote nothing (the tests check that). A `success` can only happen after the runner's live check found the tenant's `search_path` in effect on the connection, so in those cases PgBouncer 1.26.1 did forward the startup parameter. **Why the outcome depends on the PostgreSQL version behind the pooler is not understood**, and from 1.26 on the tests therefore pin only the invariant, not the error codes.
 
 In short: **connect the migration runner directly to PostgreSQL** (or through a TCP-level proxy), not through PgBouncer. Using PgBouncer for the application and a direct connection for deploys is the normal setup anyway.
 
@@ -306,13 +316,14 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 * Pending migrations are determined with TypeORM's rule — by **name**, not by timestamp order — so a migration with an older timestamp than the newest executed one still runs. `plan`'s independent implementation of that rule is checked against what `run` really executes in the tests, on every TypeORM version in the matrix.
 * TypeORM loads entity and migration files when each tenant DataSource is initialized, so they are loaded once per tenant per phase (preflight + run); keep `entities` small in the config you use for migrations. Entities in the config are fine: with entities that include views, generated columns or uuid generation, `plan`/`status` stay read-only, `synchronize` / `dropSchema` / `installExtensions` from your config are overridden (no entity-only table is created, no extension installed), and TypeORM's own bookkeeping table `typeorm_metadata` is created **inside each tenant schema** (never in `public`) when `run` executes against such entities. All tested.
 * `executedKnown: false` (history unreadable after failure) is exercised by a test that cuts the database connection mid-migration.
+* PostgreSQL below 12 is not tested and not supported.
 * Only the first-party read-only/locking guarantees listed here are tested. Anything not listed (other drivers, replication, pgBouncer transaction mode, Windows paths, …) is untested.
 
 ## Compatibility
 
 Everything below was **actually run**; nothing is inferred. The suite is unit + integration + CLI tests against a real database.
 
-### GitHub Actions (last verified at commit `54d8c14`: all 20 jobs green)
+### GitHub Actions (last verified at commit `69e03e7`: all 23 jobs green)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
@@ -331,12 +342,17 @@ Everything below was **actually run**; nothing is inferred. The suite is unit + 
 | latest 1.x | latest 8.x | 15 | 22 | pass |
 | latest 1.x | latest 8.x | 17 | 22 | pass |
 
-All rows run on Ubuntu with the `postgres:<major>` image as a service container. Two more jobs run on other operating systems, with PostgreSQL installed natively (service containers exist only on Linux):
+All rows above run on Ubuntu x64 with the `postgres:<major>` image as a service container. Five more jobs run elsewhere (service containers exist only on Linux x64 here, so the macOS and Windows jobs install PostgreSQL themselves and turn TLS on with a self-signed certificate; the arm64 job uses the same service container as the Linux rows):
 
-| OS (GitHub-hosted `-latest`) | PostgreSQL | Node | TypeORM / pg | Result | Not exercised there |
+| Runner | PostgreSQL | Node | TypeORM / pg | Result (read from the job logs) | Not exercised there |
 | --- | --- | --- | --- | --- | --- |
-| macOS | 16 (Homebrew; password auth enabled in `pg_hba.conf`) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass: 301 passed, 13 skipped (8 PgBouncer + 5 TLS tests; read from the job log) | PgBouncer and TLS tests (no PgBouncer, server without TLS) |
-| Windows | 16 (Chocolatey) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | pass: 298 passed, 16 skipped (8 PgBouncer + 5 TLS + 3 signal tests; read from the job log) | PgBouncer and TLS tests (same reason); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
+| macOS (`macos-latest`, Apple silicon) | 16.15 (Homebrew; password auth enabled in `pg_hba.conf`; TLS with a self-signed certificate) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | 326 / 326 pass, nothing skipped; PgBouncer 1.26.1 (Homebrew) | – |
+| macOS | 18.6 (Homebrew; same setup) | 22 | same | 326 / 326 pass, nothing skipped; PgBouncer 1.26.1 | – |
+| Windows (`windows-latest`) | 16.15 (Chocolatey 16.15.5; TLS with a self-signed certificate) | 22 | same | 315 passed, 11 skipped (8 PgBouncer + 3 signal tests) | PgBouncer (no Windows build in CI); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
+| Windows | 18.6 (Chocolatey 18.6.5; same setup) | 22 | same | 315 passed, 11 skipped (same) | same |
+| Linux arm64 (`ubuntu-24.04-arm`) | 16.15 (`postgres:16` image, `aarch64`) | 22 | same | 309 passed, 5 skipped (the 5 TLS tests, which the x64 TLS job runs) in the run at `45525f4`; PgBouncer 1.22.0 | TLS (x64 only) |
+
+Running these jobs for the first time also showed two things: the TLS sampling test needed a minimum calibrated on the slowest runner (a quiet Linux machine saw 39-48 sessions in 1.5 s, the two Windows runners 6 and 16), and PgBouncer's behavior is not stable across versions (see [Connection poolers](#connection-poolers)).
 
 The run found and fixed Windows problems that Linux could not show: `tsImport` needs a file URL rather than a `D:\…` path, and migration globs must use forward slashes (see [Module formats](#module-formats)).
 
@@ -353,7 +369,7 @@ The run found and fixed Windows problems that Linux could not show: `tsImport` n
 | 0.3.31 | 8.5.1 | 16.15 | 22.22 | 314 / 314 pass |
 | 0.3.31 | 8.11.5 | 16.15 | 22.22 | 314 / 314 pass |
 
-`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12, PostgreSQL 18 on macOS/Windows, Node other than 20/22/24 (Node 20/24 only on Linux), other architectures, TLS and PgBouncer on macOS/Windows, graceful interruption by signal on Windows, connection poolers other than PgBouncer 1.22.
+`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12; Node 20 and 24 on macOS and Windows (they run only on Linux x64); macOS on Intel, Windows on ARM; PgBouncer on Windows; connection poolers other than PgBouncer, and PgBouncer versions other than 1.22.0, 1.25.1 and 1.26.1; graceful interruption by signal on Windows.
 
 ## Performance and limits
 
