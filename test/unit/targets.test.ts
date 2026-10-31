@@ -65,6 +65,9 @@ describe('validateTargets', () => {
     ['non-string id', [{ id: 5, schema: 'a' }]],
     ['padded id', [{ id: ' a', schema: 'a' }]],
     ['control char id', [{ id: 'a\nb', schema: 'a' }]],
+    ['bidi override in id (spoofs a terminal log)', [{ id: 'tenant\u202Egnp.exe', schema: 'a' }]],
+    ['zero-width space in id', [{ id: 'ten\u200Bant', schema: 'a' }]],
+    ['line separator in id', [{ id: 'a\u2028b', schema: 'a' }]],
     ['missing schema', [{ id: 'a' }]],
   ])('rejects malformed input (%s)', (_label, input) => {
     expect(codeOf(() => validateTargets(input))).toMatch(/INVALID_TENANT_TARGET|UNSAFE_SCHEMA_NAME/);

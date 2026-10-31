@@ -292,6 +292,8 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 
 * Schema names go through a strict allowlist before they are used in SQL or connection options; the history table name too. Existence checks use bound parameters. See [`docs/safety.md`](docs/safety.md).
 * Reports, logs, and CLI errors pass through a redactor: the configured password, the connection URL, anything URL-shaped, and `password=…`-style fragments are removed. SQL text and parameters are never logged, and TypeORM's own console output is silenced on tenant connections (it would otherwise print raw migration errors on stdout). This is *defense in depth* — migrations that print secrets by themselves with `console.log` are outside its reach.
+* **Database error messages can contain tenant data.** Only credentials and URLs are redacted from them. A failed cast, for example, reports the value that did not convert (`invalid input syntax for type integer: "forty-two"`); a unique violation reports the constraint name, not the key (checked). Treat the report and the CI log of a failed run like the data it came from.
+* The config file, the migration files and (for a `.ts` config) `tsx` run with your privileges; do not run the CLI from a directory whose contents you do not trust.
 * The database role does not need to be a superuser and never creates schemas or extensions. It is tested with a role that has only `CONNECT` on the database and owns the tenant schemas and their tables; it needs whatever privileges your migrations themselves need on each tenant schema, and nothing on `public`.
 * Reporting vulnerabilities: see [SECURITY.md](SECURITY.md).
 

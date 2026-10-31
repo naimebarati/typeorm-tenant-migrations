@@ -131,6 +131,11 @@ describe('collectSecrets', () => {
     const s = collectSecrets(base({ password: 'a-pass', url: 'postgres://u:url%20pw@h/d', extra: { password: 'x-pass' } }));
     expect(s).toEqual(expect.arrayContaining(['a-pass', 'postgres://u:url%20pw@h/d', 'url pw', 'url%20pw', 'x-pass']));
   });
+
+  it('includes the passphrase of a TLS client key', () => {
+    expect(collectSecrets(base({ password: 'a-pass', ssl: { passphrase: 'key-passphrase' } }))).toEqual(expect.arrayContaining(['a-pass', 'key-passphrase']));
+    expect(collectSecrets(base({ password: 'a-pass', ssl: true }))).toEqual(['a-pass']);
+  });
 });
 
 describe('silentTypeOrmLogger', () => {

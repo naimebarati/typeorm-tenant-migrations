@@ -60,6 +60,7 @@ export function collectSecrets(base: PostgresOptions): string[] {
       /* not a URL; the full string is already covered */
     }
   }
+  if (typeof base.ssl === 'object' && base.ssl !== null && typeof base.ssl.passphrase === 'string') secrets.push(base.ssl.passphrase);
   const extra = base.extra as Record<string, unknown> | undefined;
   for (const key of ['password', 'connectionString']) {
     const v = extra?.[key];

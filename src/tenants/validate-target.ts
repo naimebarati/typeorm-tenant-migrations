@@ -43,10 +43,10 @@ export function validateTarget(target: unknown): TenantMigrationTarget {
     throw new TenantMigrationError('INVALID_TENANT_TARGET', 'Each tenant must be an object { id, schema }.');
   }
   const { id, schema } = target as Record<string, unknown>;
-  if (typeof id !== 'string' || id.length === 0 || id.length > 200 || id !== id.trim() || /[\u0000-\u001f\u007f]/.test(id)) {
+  if (typeof id !== 'string' || id.length === 0 || id.length > 200 || id !== id.trim() || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(id)) {
     throw new TenantMigrationError(
       'INVALID_TENANT_TARGET',
-      `Invalid tenant id ${show(id)}: expected a non-empty string without surrounding whitespace or control characters.`,
+      `Invalid tenant id ${show(id)}: expected a non-empty string without surrounding whitespace, control or invisible formatting characters.`,
     );
   }
   assertSafeIdentifier(schema);
