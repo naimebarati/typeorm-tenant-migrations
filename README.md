@@ -2,7 +2,7 @@
 
 Run your normal **TypeORM migrations** across a PostgreSQL database that uses **one schema per tenant** — one tenant, a few, or all of them — with the guard rails a multi-tenant deploy needs.
 
-> **Status: `0.1.0-alpha.1`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux, and on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
+> **Status: `0.1.0-alpha.2`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux, and on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
 
 ## The problem
 

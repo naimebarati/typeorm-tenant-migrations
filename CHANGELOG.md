@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.2
+
+No change to the package's code: `dist/` is built from the same sources as `0.1.0-alpha.1`. What differs is how it is published and checked.
+
+* First release published from GitHub Actions (`.github/workflows/release.yml`) through npm trusted publishing, with provenance. The workflow refuses a tag that does not match `package.json`, is not on `main`, or is already published, and runs lint, typecheck and the full test suite against PostgreSQL 16 before `npm publish`.
+* CI also runs weekly, retries the Chocolatey PostgreSQL install on Windows, and installs the TypeORM / `pg` versions of each matrix entry in one command and asserts them (before, every job ran TypeORM 0.3.31 whatever the matrix said).
+* The TLS test for the read-only inspection connections now observes them for about 1.5 s instead of one `plan`/`status` pass; it could miss every session on a loaded runner.
+* The README gives the exact dependency versions and the test counts, including the skipped tests, of the macOS and Windows jobs, read from the CI logs.
+
 ## 0.1.0-alpha.1
 
 First alpha. Not production-hardened; see "Known limitations" in the README.
