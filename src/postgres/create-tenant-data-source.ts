@@ -3,6 +3,7 @@ import { DataSource as DataSourceClass } from 'typeorm';
 import { TenantMigrationError } from '../errors/index.js';
 import type { TenantMigrationLogger } from '../logger/types.js';
 import { assertUrlHasNoStartupOptions, mergeStartupOptions } from './search-path.js';
+import { withVerifiedConnections, type ClientClass } from './verified-client.js';
 
 export type PostgresOptions = Extract<DataSourceOptions, { type: 'postgres' }>;
 
@@ -114,6 +115,11 @@ export function buildTenantDataSourceOptions(
 
   const extra = { ...(base.extra as Record<string, unknown> | undefined) };
   extra.options = mergeStartupOptions(extra.options, spec.searchPath, spec.readOnly ? ['-c default_transaction_read_only=on'] : []);
+  // Every connection the pool opens proves its own search_path before it is handed out; see verified-client.ts.
+  if (extra.Client !== undefined && typeof extra.Client !== 'function') {
+    throw new TenantMigrationError('INVALID_CONFIGURATION', 'The base DataSource "extra.Client" must be a pg client class.');
+  }
+  extra.Client = withVerifiedConnections(extra.Client as ClientClass | undefined, { searchPath: spec.searchPath, readOnly: spec.readOnly === true });
 
   return {
     ...base,
@@ -178,6 +184,8 @@ export async function initializeOwned(options: DataSourceOptions, redact: (text:
   } catch (cause) {
     // A partially initialized DataSource may still hold a pool.
     if (dataSource.isInitialized) await dataSource.destroy().catch(() => undefined);
+    // A connection that failed its own search_path check (verified-client.ts) keeps its code instead of becoming a generic failure.
+    if (cause instanceof TenantMigrationError) throw cause;
     const detail = cause instanceof Error && cause.message ? `: ${redact(cause.message).slice(0, 500)}${moduleLoadingHint(cause.message)}` : '';
     throw new TenantMigrationError('DATASOURCE_INITIALIZATION_FAILED', `Could not initialize the DataSource (connection or migration loading failed)${detail}`, { cause });
   }

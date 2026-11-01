@@ -5,7 +5,7 @@ What is guaranteed, how, and which test pins it. If a row has no test, it isn't 
 | Guarantee | Mechanism | Test |
 | --- | --- | --- |
 | Unqualified SQL hits only the target schema | `search_path` set as connection startup parameter on every pooled connection | `schema-isolation.test.ts`, `runner.test.ts`, `typeorm-schema-behavior.test.ts` (shows the problem without it) |
-| Wrong context ⇒ nothing runs | live check of `search_path` + `current_schema()` before locking/migrating | `runner-failure.test.ts` (TCP proxy that strips the startup option) |
+| Wrong context ⇒ nothing runs | live check of `search_path` + `current_schema()` before locking/migrating; and every connection the tenant's pool opens proves its own `search_path` (and read-only mode for plan/status) before the pool hands it out (`verified-client.ts`, given to the pool as `extra.Client`) | `runner-failure.test.ts` (TCP proxy that strips the startup option; and a second pooled connection that silently lost it), `verified-client.test.ts` |
 | No SQL injection through names | schema `^[a-z_][a-z0-9_]*$`, ≤ 63 chars, reserved names refused; history table `^[A-Za-z_][A-Za-z0-9_]{0,62}$`; existence checks with bind parameters | `targets.test.ts`, `options.test.ts`, `migration-history.test.ts` (the one place that builds SQL from names checks them again) |
 | `public` / system schemas never targeted | reserved-name check on every tenant at validation time | `targets.test.ts`, `runner.test.ts` |
 | Schemas are never created | no `CREATE SCHEMA` anywhere; missing schema ⇒ `SCHEMA_NOT_FOUND` | `runner.test.ts` |
@@ -26,7 +26,7 @@ What is guaranteed, how, and which test pins it. If a row has no test, it isn't 
 * Atomicity across tenants.
 * `transaction: 'none'` and non-transactional statements leave partial state on failure (demonstrated in `runner-failure.test.ts`).
 * Poolers in transaction mode: detected and refused, not supported.
-* A pooler that reports success but leaves a connection in the default `search_path`: PgBouncer 1.26.1 in session pooling in front of PostgreSQL 16 does that to the second client that reuses a server connection (measured with `scripts/probe-pgbouncer.mjs`, see the README). The runner's live check covers the connection it verified; a migration that opens another pooled connection of its own is not covered. Connect the runner directly to PostgreSQL.
+* A pooler that changes a connection's `search_path` *after* it passed the check. The check runs when a connection is opened (PgBouncer 1.26.1 in session pooling in front of PostgreSQL 16 gives the second client that reuses a server connection the default `search_path` at that moment, measured with `scripts/probe-pgbouncer.mjs`; that case is now refused), not before every statement. Connect the runner directly to PostgreSQL.
 * Non-transactional statements interrupted by a second signal or `SIGKILL`.
 * Anything that connects without going through this runner.
 * **Data in database error messages.** A failing migration's message is reported after credentials and URLs are redacted, nothing more. PostgreSQL puts the offending value into some messages: a failed cast reports `invalid input syntax for type integer: "forty-two"`, and that string is tenant data. The `detail` field (which carries the full key of a unique violation) is not included: a duplicate-key error reports the constraint name only. Both were checked with real failing migrations; other error kinds were not enumerated. Treat the report and the CI log of a failed run like the data it came from.

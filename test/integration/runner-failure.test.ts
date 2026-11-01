@@ -118,6 +118,33 @@ describe('failure across tenants', () => {
 });
 
 describe('fail-closed on search_path', () => {
+  it('refuses a second pooled connection that silently lost the search_path, instead of running on it', async () => {
+    // The first connection of a tenant gets the option, a second one opened while it is busy does not (PgBouncer 1.26.1
+    // in session pooling in front of PostgreSQL < 18 does exactly that). The migration arms the proxy and opens such a
+    // second connection from the tenant's pool.
+    const proxy = await startPgProxy({ host: String(db.options.host), port: Number(db.options.port) }, {});
+    try {
+      const sneaky = defineMigration('Sneaky1700000000021', async (q: QueryRunner) => {
+        proxy.stripNextOptionsConnection();
+        const other = q.connection.createQueryRunner(); // connects lazily: a second connection, opened while this one is busy
+        try {
+          await other.query(`INSERT INTO "orders"(id) VALUES (777)`); // would land in public.orders
+        } finally {
+          await other.release();
+        }
+      });
+      const report = await makeRunner({ db, migrations: [sneaky], base: { port: proxy.port } }).run({ target: { tenants: ['alpha'] } });
+
+      expect(report.tenants[0]!.pendingBeforeRun).toEqual(['Sneaky1700000000021']); // the migration really started
+      expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'SCHEMA_CONTEXT_MISMATCH' } });
+      expect((await db.client.query('SELECT count(*) FROM public.orders')).rows[0].count).toBe('0');
+      expect((await db.client.query('SELECT count(*) FROM tenant_alpha.orders')).rows[0].count).toBe('0');
+    } finally {
+      await proxy.close();
+    }
+    expect(await waitForNoSessions(db)).toBe(0);
+  });
+
   it('does not run any migration when the connection path silently drops the search_path option', async () => {
     // A pooler that ignores startup options: the client asked for tenant_alpha, the server never heard it.
     const proxy = await startPgProxy({ host: String(db.options.host), port: Number(db.options.port) }, { stripOptions: true });

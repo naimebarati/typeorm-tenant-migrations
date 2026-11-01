@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* **Every connection of a tenant's pool now proves its `search_path` before it is handed out** (and read-only mode, for `plan`/`status`/preflight). Until now only the connection the runner used was checked, so behind a pooler that drops startup options for some connections (PgBouncer 1.26.1, session pooling, PostgreSQL < 18) a migration that opened a second pooled connection ran its SQL in `public` and the run reported success; a regression test with a TCP proxy reproduced that (a row landed in `public.orders`). A connection that fails the check is closed and the operation that needed it fails with `SCHEMA_CONTEXT_MISMATCH`. Cost: one query per newly opened connection. Implemented as a `pg` client class given to the pool as `extra.Client`; a caller's own `extra.Client` is extended, not replaced (and a non-class `extra.Client` is an `INVALID_CONFIGURATION`).
+* Security review of `src/`: the history query checks its names itself, the TLS key passphrase is redacted, tenant ids with invisible formatting characters are refused (see `docs/safety.md` for two documented limits).
+* README: measured PgBouncer 1.22.0, 1.25.1 and 1.26.1 behavior (`scripts/probe-pgbouncer.mjs`); native-OS and arm64 CI jobs; PostgreSQL below 12 is not supported.
+
 ## 0.1.0-alpha.2
 
 No change to the package's code: `dist/` is built from the same sources as `0.1.0-alpha.1`. What differs is how it is published and checked.

@@ -69,6 +69,24 @@ describe('buildTenantDataSourceOptions', () => {
     expect(warn.mock.calls[0]![0]).toContain('synchronize');
   });
 
+  it("gives the pool a client class that verifies every connection, and keeps the caller's own client class as its parent", () => {
+    class MyClient {}
+    const plain = buildTenantDataSourceOptions(base(), spec);
+    expect(typeof (plain.extra as Record<string, unknown>).Client).toBe('function');
+
+    const custom = buildTenantDataSourceOptions(base({ extra: { Client: MyClient } }), spec);
+    const Wrapped = (custom.extra as Record<string, unknown>).Client as new () => unknown;
+    expect(new Wrapped()).toBeInstanceOf(MyClient);
+  });
+
+  it('rejects an extra.Client that is not a class', () => {
+    expect(codeOf(() => buildTenantDataSourceOptions(base({ extra: { Client: 'pg-native' } }), spec))).toBe('INVALID_CONFIGURATION');
+  });
+
+  it('does not verify connections of the lock DataSource, which has no tenant search_path', () => {
+    expect((buildLockDataSourceOptions(base()).extra as Record<string, unknown>).Client).toBeUndefined();
+  });
+
   it('does not mutate the base options, including nested extra', () => {
     const extra = { max: 3, options: '-c statement_timeout=1' };
     const original = base({ extra, schema: 'public' });
