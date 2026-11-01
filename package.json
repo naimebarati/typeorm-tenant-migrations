@@ -1,6 +1,6 @@
 {
   "name": "typeorm-tenant-migrations",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "Run TypeORM migrations safely across PostgreSQL schema-per-tenant databases: per-tenant history, advisory locks, enforced search_path, read-only plan/status.",
   "license": "MIT",
   "repository": {
