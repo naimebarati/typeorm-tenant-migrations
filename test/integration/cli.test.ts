@@ -274,6 +274,39 @@ describe('revert through the CLI', () => {
     expect(await history('tenant_alpha')).toEqual([M.addStatus.name, M.createThings.name]);
   });
 
+  it('--transaction and --lock-timeout are refused for plan and status', async () => {
+    const p = writeProject({ db, migrations: normal });
+    for (const command of ['plan', 'status']) {
+      for (const extra of [['--transaction', 'each'], ['--lock-timeout', '100']]) {
+        const r = await cli([command, '--all', '--config', p.config, ...extra]);
+        expect(r.code, `${command} ${extra[0]}`).toBe(EXIT.USAGE);
+        expect(r.stderr).toContain('only applies to "run" and "revert"');
+      }
+    }
+  });
+
+  it('a first SIGTERM while waiting for the lock stops it before it starts: exit 130, nothing changed (in-process)', async () => {
+    const p = writeProject({ db, migrations: normal });
+    await cli(['run', '--all', '--config', p.config]);
+    const before = await snapshotDatabase(db.client);
+    const holder = await acquireAdvisoryLock({ ...db.options }, { schema: 'tenant_alpha', timeoutMs: 0 });
+    try {
+      const listeners = process.listenerCount('SIGTERM');
+      const running = cli(['revert', '--tenant', 'alpha', '--migration', M.createThings.name, '--lock-timeout', '30000', '--config', p.config]);
+      await new Promise((r) => setTimeout(r, 500));
+      process.emit('SIGTERM');
+      const r = await running;
+      expect(r.code).toBe(EXIT.INTERRUPTED);
+      expect(r.stderr).toContain('Received SIGTERM');
+      expect(r.stdout).toContain('NOT RUN');
+      expect(r.stdout).toContain('Interrupted before the revert started');
+      expect(process.listenerCount('SIGTERM')).toBe(listeners);
+    } finally {
+      await holder.release();
+    }
+    expect(await snapshotDatabase(db.client)).toEqual(before);
+  });
+
   it('--help documents the command', async () => {
     const r = await cli(['--help']);
     expect(r.stdout).toContain('revert --config <file> --tenant <id> --migration <name>');

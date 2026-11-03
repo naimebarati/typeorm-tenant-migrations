@@ -326,7 +326,12 @@ export async function revertTenant(
     if (revertStarted) {
       try {
         const after = await withQueryRunner(dataSource!, (queryRunner) => readExecutedMigrations(queryRunner, target.schema, ctx.historyTable));
-        result.reverted = namesRemoved(before, after);
+        if (after) {
+          result.reverted = namesRemoved(before, after);
+        } else {
+          // The history table itself is gone (a down() dropped it): "rows that disappeared" would be every row and mean nothing.
+          result.executedKnown = false;
+        }
       } catch {
         result.reverted = [];
         result.executedKnown = false;

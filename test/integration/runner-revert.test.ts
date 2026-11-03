@@ -9,6 +9,7 @@ import { isCleanReport } from '../../src/runner/report.js';
 import { seedTenants } from '../helpers/fixtures.js';
 import type { TestDatabase } from '../helpers/pg.js';
 import { advisoryLocksHeld, columnsOf, createTestDatabase, snapshotDatabase, tablesOf, waitForNoSessions } from '../helpers/pg.js';
+import { startPgProxy } from '../helpers/proxy.js';
 import { ALL, ALPHA, BETA, makeRunner } from '../helpers/runner.js';
 
 let db: TestDatabase;
@@ -207,6 +208,66 @@ describe('revert: when down() fails or the tenant is busy', () => {
     }
     expect(await snapshotDatabase(db.client)).toEqual(before);
     expect(await historyOf('tenant_alpha')).toEqual([A, T, B]);
+  });
+
+  it('a signal that aborts while the revert waits for the lock: gives up at once, not-started, the holder untouched', async () => {
+    await migrateAll();
+    const before = await snapshotDatabase(db.client);
+    const holder = await acquireAdvisoryLock({ ...db.options }, { schema: 'tenant_alpha', timeoutMs: 0 });
+    try {
+      const controller = new AbortController();
+      const started = Date.now();
+      const running = makeRunner({ db, migrations, options: { lockTimeoutMs: 30_000 } }).revert({ tenant: 'alpha', migration: B, signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 400));
+      controller.abort();
+      const report = await running;
+
+      expect(Date.now() - started).toBeLessThan(3000); // not the 30 s lock timeout
+      expect(report.interrupted).toBe(true);
+      expect(report.tenants[0]).toMatchObject({ status: 'not-started', reverted: [] });
+      expect(report.tenants[0]!.error).toBeUndefined();
+      expect(report.tenants[0]!.startedAt).toBeUndefined();
+    } finally {
+      await holder.release();
+    }
+    expect(await snapshotDatabase(db.client)).toEqual(before);
+    expect(await waitForNoSessions(db)).toBe(0);
+  });
+
+  it('losing the database in the middle of down(): failed, and `executedKnown: false` instead of a guess about what was reverted', async () => {
+    const SlowDown = reversible(
+      'SlowDown1700000000207',
+      async (q) => void (await q.query('ALTER TABLE "orders" ADD COLUMN "slow" text')),
+      async (q) => {
+        await q.query('ALTER TABLE "orders" DROP COLUMN "slow"');
+        await q.query('SELECT pg_sleep(1.5)');
+      },
+    );
+    await makeRunner({ db, migrations: [SlowDown] }).run({ target: { tenants: ['alpha'] } });
+    const proxy = await startPgProxy({ host: String(db.options.host), port: Number(db.options.port) }, { stripOptions: false });
+    try {
+      setTimeout(() => proxy.cut(), 500);
+      const report = await makeRunner({ db, migrations: [SlowDown], base: { port: proxy.port } }).revert({ tenant: 'alpha', migration: 'SlowDown1700000000207' });
+      expect(report.tenants[0]).toMatchObject({ status: 'failed', reverted: [], executedKnown: false, error: { code: 'MIGRATION_FAILED' } });
+    } finally {
+      await proxy.close();
+    }
+    await new Promise((r) => setTimeout(r, 1500)); // the server rolls the transaction back once it notices the client is gone
+    expect(await columnsOf(db.client, 'tenant_alpha', 'orders')).toEqual(['id', 'slow']);
+    expect(await historyOf('tenant_alpha')).toEqual(['SlowDown1700000000207']);
+  });
+
+  it('a down() that drops the history table itself: failed, and nothing is claimed about what was reverted', async () => {
+    const DropsHistory = reversible(
+      'DropsHistory1700000000208',
+      async (q) => void (await q.query('SELECT 1')),
+      async (q) => void (await q.query('DROP TABLE "migrations"')),
+      { transaction: false },
+    );
+    await makeRunner({ db, migrations: [DropsHistory] }).run({ target: { tenants: ['alpha'] } });
+    const report = await makeRunner({ db, migrations: [DropsHistory] }).revert({ tenant: 'alpha', migration: 'DropsHistory1700000000208' });
+    expect(report.tenants[0]).toMatchObject({ status: 'failed', reverted: [], executedKnown: false, error: { code: 'MIGRATION_FAILED' } });
+    expect(await tablesOf(db.client, 'tenant_alpha')).not.toContain('migrations');
   });
 
   it('a signal that is already aborted starts nothing', async () => {
