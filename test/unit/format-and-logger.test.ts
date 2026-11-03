@@ -39,7 +39,7 @@ describe('formatRun', () => {
 describe('formatPlan / formatStatus', () => {
   const entry = { tenantId: 'a', schema: 'tenant_a', status: 'ok' as const, pending: ['M1'], pendingCount: 1 };
   const summary = { total: 2, ok: 1, failed: 1, pendingTotal: 1 };
-  const failed = { tenantId: 'z', schema: 'tenant_z', status: 'failed' as const, pending: [], pendingCount: 0, error: { code: 'SCHEMA_NOT_FOUND', message: 'nope' } };
+  const failed = { tenantId: 'z', schema: 'tenant_z', status: 'failed' as const, pending: [], pendingCount: 0, error: { code: 'SCHEMA_NOT_FOUND' as const, message: 'nope' } };
 
   it('plan lists pending migrations and states that nothing was changed', () => {
     const text = formatPlan({ startedAt: '', finishedAt: '', summary, tenants: [entry, failed] });

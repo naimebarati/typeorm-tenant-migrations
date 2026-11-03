@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { validateOptions, validateTableName } from '../config/validate-config.js';
 import type { ResolvedOptions, TenantMigrationRunnerConfig, TenantMigrationTarget, TenantProvider, TenantSelection } from '../config/types.js';
-import { TenantMigrationError } from '../errors/index.js';
+import { TenantMigrationError, type TenantMigrationErrorCode } from '../errors/index.js';
 import { createRedactor } from '../errors/sanitize.js';
 import { warnIfConnectionBudgetIsTight } from '../postgres/connection-budget.js';
 import { buildTenantDataSourceOptions, collectSecrets, resolveBaseOptions } from '../postgres/create-tenant-data-source.js';
 import { resolveTenants } from '../tenants/tenant-provider.js';
 import { selectTargets } from '../tenants/select-targets.js';
-import type { TenantMigrationResult, TenantMigrationRunReport } from './report.js';
+import type { TenantMigrationResult, TenantMigrationRunReport, TenantRevertReport } from './report.js';
 import { summarize } from './report.js';
 import type { RunnerContext, TenantInspection } from './tenant-worker.js';
-import { executeTenant, inspectTenant } from './tenant-worker.js';
+import { executeTenant, inspectTenant, revertTenant } from './tenant-worker.js';
 import { runPool } from './worker-pool.js';
 
 export interface TargetParams {
@@ -26,13 +26,25 @@ export interface RunParams extends TargetParams {
   signal?: AbortSignal;
 }
 
+export interface RevertParams {
+  /** Logical id of the one tenant to revert. There is no `all`: a revert is never a batch. */
+  tenant: string;
+  /**
+   * Name of the migration to revert. It has to be the last executed migration of the tenant's history; any other
+   * name is refused (REVERT_REFUSED) and nothing is executed.
+   */
+  migration: string;
+  /** Same meaning as for `run`: a revert still waiting for the tenant's lock gives up; one that started finishes. */
+  signal?: AbortSignal;
+}
+
 export interface TenantPlanEntry {
   tenantId: string;
   schema: string;
   status: 'ok' | 'failed';
   pending: string[];
   pendingCount: number;
-  error?: { code: string; message: string };
+  error?: { code: TenantMigrationErrorCode; message: string };
 }
 
 export interface TenantStatusEntry extends TenantPlanEntry {
@@ -171,6 +183,38 @@ export class TenantMigrationRunner {
       tenants,
     };
     log.info(`Run ${runId} finished: ${JSON.stringify(report.summary)}`);
+    return report;
+  }
+
+  /**
+   * Reverts the last executed migration of ONE tenant, if the caller named it. Never runs on several tenants,
+   * never reverts more than one migration, never picks a migration for the caller. Configuration and selection
+   * errors throw; everything that happens to the tenant is reported.
+   */
+  async revert(params: RevertParams): Promise<TenantRevertReport> {
+    const p = params as Partial<RevertParams> | undefined;
+    if (typeof p?.tenant !== 'string' || p.tenant === '') {
+      throw new TenantMigrationError('INVALID_TENANT_TARGET', '"tenant" must be the id of exactly one tenant.');
+    }
+    if (typeof p.migration !== 'string' || p.migration === '' || p.migration.length > 255) {
+      throw new TenantMigrationError('INVALID_CONFIGURATION', '"migration" must be the name of the migration to revert (1 to 255 characters).');
+    }
+    const runId = randomUUID();
+    const startedAt = new Date().toISOString();
+    const signal = p.signal;
+    const [target] = await this.selectTargets({ target: { tenants: [p.tenant] } });
+    this.ctx.logger.info(`Revert ${runId}: tenant "${target!.id}", migration "${p.migration}", transaction '${this.ctx.options.transaction}'.`);
+    const result = await revertTenant(this.ctx, target!, p.migration, signal);
+    const report: TenantRevertReport = {
+      runId,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      summary: summarize([result]),
+      // Interrupted only if the signal kept the revert from starting; a revert that ran to the end is complete.
+      ...(result.status === 'not-started' ? { interrupted: true as const } : {}),
+      tenants: [result],
+    };
+    this.ctx.logger.info(`Revert ${runId} finished: ${JSON.stringify(report.summary)}`);
     return report;
   }
 

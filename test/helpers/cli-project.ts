@@ -14,8 +14,8 @@ export interface Project {
 }
 
 export const MIGRATION_BODIES = {
-  addStatus: { name: 'AddStatus1700000000001', body: `await q.query('ALTER TABLE "orders" ADD COLUMN "status" text');` },
-  createThings: { name: 'CreateThings1700000000002', body: `await q.query('CREATE TABLE "things" (id int)');` },
+  addStatus: { name: 'AddStatus1700000000001', body: `await q.query('ALTER TABLE "orders" ADD COLUMN "status" text');`, down: `await q.query('ALTER TABLE "orders" DROP COLUMN "status"');` },
+  createThings: { name: 'CreateThings1700000000002', body: `await q.query('CREATE TABLE "things" (id int)');`, down: `await q.query('DROP TABLE "things"');` },
   // Sleeps inside the tenant's lock and records every entry in the tenant's own audit table.
   slowAudit: { name: 'SlowAudit1700000000003', body: `await q.query("INSERT INTO \\"audit\\"(note) VALUES ('entered')"); await q.query('SELECT pg_sleep(1.2)');` },
   failsOnBeta: {
@@ -29,7 +29,7 @@ export interface ProjectOptions {
   kind?: 'cjs' | 'mjs' | 'ts' | 'ts-enum' | 'async-fn' | 'mjs-tla';
   /** How migration files are written: CommonJS .js, ES module .mjs (one class per file), .mjs with all classes as named exports in ONE file, TS (erasable), TS using an enum. */
   migrationFormat?: 'cjs' | 'esm' | 'esm-one-file' | 'ts' | 'ts-enum';
-  migrations: Array<{ name: string; body: string }>;
+  migrations: Array<{ name: string; body: string; down?: string }>;
   tenants?: Array<{ id: string; schema: string }>;
   options?: Record<string, unknown>;
   dbOverrides?: Record<string, unknown>;
@@ -40,10 +40,10 @@ export function writeProject({ db, kind = 'cjs', migrationFormat = 'cjs', migrat
   const dir = mkdtempSync(path.join(SCRATCH, 'cli-'));
   mkdirSync(path.join(dir, 'migrations'));
   const ext = { cjs: 'js', esm: 'mjs', 'esm-one-file': 'mjs', ts: 'ts', 'ts-enum': 'ts' }[migrationFormat];
-  const cjsClass = (m: { name: string; body: string }) => `class ${m.name} { constructor() { this.name = '${m.name}'; } async up(q) { ${m.body} } async down() {} }`;
-  const esmClass = (m: { name: string; body: string }, exportKw: string) => `${exportKw} class ${m.name} { name = '${m.name}'; async up(q) { ${m.body} } async down() {} }`;
-  const tsClass = (m: { name: string; body: string }) =>
-    `import type { MigrationInterface, QueryRunner } from 'typeorm';\n${migrationFormat === 'ts-enum' ? 'enum Marker { A = "a" }\nvoid Marker.A;\n' : ''}export class ${m.name} implements MigrationInterface {\n  name = '${m.name}';\n  async up(q: QueryRunner): Promise<void> { ${m.body.replace(/\bq\b/g, 'q')} }\n  async down(): Promise<void> {}\n}\n`;
+  const cjsClass = (m: { name: string; body: string; down?: string }) => `class ${m.name} { constructor() { this.name = '${m.name}'; } async up(q) { ${m.body} } ${m.down ? `async down(q) { ${m.down} }` : 'async down() {}'} }`;
+  const esmClass = (m: { name: string; body: string; down?: string }, exportKw: string) => `${exportKw} class ${m.name} { name = '${m.name}'; async up(q) { ${m.body} } ${m.down ? `async down(q) { ${m.down} }` : 'async down() {}'} }`;
+  const tsClass = (m: { name: string; body: string; down?: string }) =>
+    `import type { MigrationInterface, QueryRunner } from 'typeorm';\n${migrationFormat === 'ts-enum' ? 'enum Marker { A = "a" }\nvoid Marker.A;\n' : ''}export class ${m.name} implements MigrationInterface {\n  name = '${m.name}';\n  async up(q: QueryRunner): Promise<void> { ${m.body.replace(/\bq\b/g, 'q')} }\n  ${m.down ? `async down(q: QueryRunner): Promise<void> { ${m.down} }` : 'async down(): Promise<void> {}'}\n}\n`;
   if (migrationFormat === 'esm-one-file') {
     writeFileSync(path.join(dir, 'migrations', 'all.mjs'), migrations.map((m) => esmClass(m, 'export')).join('\n') + '\n');
   } else {

@@ -1,5 +1,6 @@
 export { TenantMigrationRunner } from './runner/tenant-migration-runner.js';
 export type {
+  RevertParams,
   RunParams,
   TargetParams,
   TenantInspectionReport,
@@ -10,6 +11,8 @@ export type {
   TenantMigrationRunReport,
   TenantMigrationResult,
   TenantMigrationRunSummary,
+  TenantRevertReport,
+  TenantRevertResult,
   TenantRunStatus,
 } from './runner/report.js';
 export { isCleanReport } from './runner/report.js';

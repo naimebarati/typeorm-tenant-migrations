@@ -19,11 +19,13 @@ What is guaranteed, how, and which test pins it. If a row has no test, it isn't 
 | Caller's DataSource untouched | options copied (incl. `extra`), instance never initialized/destroyed | `runner.test.ts`, `tenant-data-source-options.test.ts` |
 | Secrets not in reports/logs/CLI output | redactor on every message; SQL and TypeORM console output silenced | `runner-security.test.ts`, `cli.test.ts` |
 | No automatic retry/rollback | none implemented | failure tests (`runner-failure.test.ts`) |
+| `revert` can only undo what the caller named | the name has to equal the last executed migration of the history read under the tenant's lock; no history, or a migration unknown to this build, is refused; one tenant, one migration per call | `runner-revert.test.ts` (snapshots before/after every refusal; the name check and the no-history check were removed once to check that the tests fail), `cli.test.ts` |
 
 ## What is not protected
 
 * A migration that changes its own `search_path`, or schema-qualifies another tenant's objects.
 * Atomicity across tenants.
+* What a migration's `down()` actually does: `revert` runs it and removes the history row, nothing more (an empty `down()` leaves the schema as it is).
 * `transaction: 'none'` and non-transactional statements leave partial state on failure (demonstrated in `runner-failure.test.ts`).
 * Poolers in transaction mode: detected and refused, not supported.
 * A pooler that changes a connection's `search_path` *after* it passed the check. The check runs when a connection is opened (PgBouncer 1.26.1 in session pooling in front of PostgreSQL 16 gives the second client that reuses a server connection the default `search_path` at that moment, measured with `scripts/probe-pgbouncer.mjs`; that case is now refused), not before every statement. Connect the runner directly to PostgreSQL.

@@ -7,7 +7,7 @@ import { createRedactor } from '../errors/sanitize.js';
 import { createConsoleLogger } from '../logger/console-logger.js';
 import { isCleanReport } from '../runner/report.js';
 import { TenantMigrationRunner } from '../runner/tenant-migration-runner.js';
-import { formatPlan, formatRun, formatStatus } from './format.js';
+import { formatPlan, formatRevert, formatRun, formatStatus } from './format.js';
 import { loadConfig } from './load-config.js';
 
 export const EXIT = {
@@ -34,26 +34,29 @@ const HELP = `typeorm-tenant-migrations — run TypeORM migrations on PostgreSQL
 
 Usage:
   typeorm-tenant-migrations <plan|status|run> --config <file> (--all | --tenant <id> [--tenant <id>...]) [options]
+  typeorm-tenant-migrations revert --config <file> --tenant <id> --migration <name> [options]
 
 Commands:
   plan     List the migrations each tenant would run. Read-only.
   status   Show executed and pending migrations per tenant. Read-only.
   run      Run pending migrations.
+  revert   Revert the last executed migration of ONE tenant (--tenant and --migration are both required).
 
 Options:
   --config <file>        Config module (.js/.cjs/.mjs, or .ts with tsx installed). Required.
   --all                  Select every tenant from the config's tenant provider.
-  --tenant <id>          Select a tenant by logical id (repeatable). Exactly one of --all / --tenant is required.
+  --tenant <id>          Select a tenant by logical id (repeatable; revert takes exactly one). Exactly one of --all / --tenant is required.
+  --migration <name>     revert: the migration to revert; it has to be the last executed one of that tenant, otherwise nothing runs.
   --json                 Print the report as JSON on stdout (logs go to stderr).
   --concurrency <n>      run/plan/status: tenants processed in parallel (default 1).
   --continue-on-error    run: keep going after a tenant fails (default: stop scheduling new tenants).
-  --transaction <mode>   run: all | each | none (default each).
-  --lock-timeout <ms>    run: how long to wait for a tenant's lock (default 30000).
+  --transaction <mode>   run/revert: all | each | none (default each).
+  --lock-timeout <ms>    run/revert: how long to wait for a tenant's lock (default 30000).
   -h, --help             Show this help.
   -v, --version          Show the version.
 
 Exit codes: 0 ok · 1 a tenant failed / not started · 2 usage or configuration error · 3 lock timeout · 70 internal error · 130 interrupted
-SIGINT/SIGTERM during "run": finish the tenants already running, start no new ones, print the report. A second signal aborts immediately.
+SIGINT/SIGTERM during "run" or "revert": finish the tenants already running, start no new ones, print the report. A second signal aborts immediately.
 `;
 
 function packageVersion(): string {
@@ -122,6 +125,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         'continue-on-error': { type: 'boolean' },
         transaction: { type: 'string' },
         'lock-timeout': { type: 'string' },
+        migration: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -132,19 +136,28 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (values.version) return void io.stdout.write(`${packageVersion()}\n`), EXIT.OK;
 
     const [command, ...extra] = positionals;
-    if (command !== 'plan' && command !== 'status' && command !== 'run') {
-      usageError(`Expected a command: plan, status or run.${command ? ` Got "${command}".` : ''} See --help.`);
+    if (command !== 'plan' && command !== 'status' && command !== 'run' && command !== 'revert') {
+      usageError(`Expected a command: plan, status, run or revert.${command ? ` Got "${command}".` : ''} See --help.`);
     }
     if (extra.length > 0) usageError(`Unexpected argument "${extra[0]}".`);
-    if (command !== 'run') {
-      for (const flag of ['continue-on-error', 'transaction', 'lock-timeout'] as const) {
-        if (values[flag] !== undefined) usageError(`--${flag} only applies to "run".`);
+    if (command !== 'run' && command !== 'revert') {
+      for (const flag of ['transaction', 'lock-timeout'] as const) {
+        if (values[flag] !== undefined) usageError(`--${flag} only applies to "run" and "revert".`);
       }
     }
+    if (command !== 'run' && values['continue-on-error'] !== undefined) usageError('--continue-on-error only applies to "run".');
+    if (command !== 'revert' && values.migration !== undefined) usageError('--migration only applies to "revert".');
+    if (command === 'revert' && values.concurrency !== undefined) usageError('--concurrency does not apply to "revert": it always works on one tenant.');
 
     const hasAll = values.all === true;
     const tenantIds = values.tenant ?? [];
-    if (hasAll === tenantIds.length > 0) usageError('Select tenants explicitly: pass exactly one of --all or --tenant <id>.');
+    if (command === 'revert') {
+      if (hasAll) usageError('"revert" works on exactly one tenant: --all is not accepted.');
+      if (tenantIds.length !== 1) usageError('"revert" needs exactly one --tenant <id>.');
+      if (values.migration === undefined || values.migration === '') usageError('"revert" needs --migration <name>: the name of the last executed migration of that tenant.');
+    } else if (hasAll === tenantIds.length > 0) {
+      usageError('Select tenants explicitly: pass exactly one of --all or --tenant <id>.');
+    }
     const target: TenantSelection = hasAll ? { all: true } : { tenants: tenantIds };
 
     if (!values.config) usageError('--config <file> is required.');
@@ -174,6 +187,18 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
     const controller = new AbortController();
     const stopListening = listenForInterrupt(controller, io);
+    if (command === 'revert') {
+      let reverted;
+      try {
+        reverted = await runner.revert({ tenant: tenantIds[0]!, migration: values.migration!, signal: controller.signal });
+      } finally {
+        stopListening();
+      }
+      io.stdout.write(`${json ? JSON.stringify(reverted, null, 2) : formatRevert(reverted)}\n`);
+      if (reverted.interrupted) return EXIT.INTERRUPTED;
+      if (isCleanReport(reverted)) return EXIT.OK;
+      return reverted.summary.failed > 0 || reverted.summary.locked === 0 ? EXIT.TENANT_FAILED : EXIT.LOCKED;
+    }
     let report;
     try {
       report = await runner.run({ target, signal: controller.signal });

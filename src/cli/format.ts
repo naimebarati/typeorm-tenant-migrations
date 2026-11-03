@@ -1,5 +1,5 @@
 import type { TenantInspectionReport, TenantPlanEntry, TenantStatusEntry } from '../runner/tenant-migration-runner.js';
-import type { TenantMigrationRunReport } from '../runner/report.js';
+import type { TenantMigrationRunReport, TenantRevertReport } from '../runner/report.js';
 
 const LABEL: Record<string, string> = Object.fromEntries(
   Object.entries({ success: 'OK', ok: 'OK', skipped: 'UPTODATE', failed: 'FAILED', locked: 'LOCKED', 'not-started': 'NOT RUN' }).map(([k, v]) => [k, v.padEnd(8)]),
@@ -21,6 +21,20 @@ export function formatRun(report: TenantMigrationRunReport): string {
   if (report.interrupted) lines.push('Interrupted: tenants that had not started were left untouched (NOT RUN).');
   const s = report.summary;
   lines.push(`Summary: ${s.total} tenant(s) — ${s.success} migrated, ${s.skipped} up to date, ${s.failed} failed, ${s.locked} locked, ${s.notStarted} not started`);
+  return lines.join('\n');
+}
+
+export function formatRevert(report: TenantRevertReport): string {
+  const lines: string[] = [`Revert ${report.runId}`];
+  for (const t of report.tenants) {
+    lines.push(`${LABEL[t.status]} ${t.tenantId} (${t.schema})${t.durationMs !== undefined ? `  ${t.durationMs} ms` : ''}`);
+    if (t.reverted.length) lines.push(`    reverted ${t.reverted.length}:`, ...list(t.reverted));
+    if (!t.executedKnown) lines.push('    the history could not be read back; check the tenant history table.');
+    if (t.error) lines.push(`    ${t.error.code}: ${t.error.message}`);
+  }
+  if (report.interrupted) lines.push('Interrupted before the revert started: nothing was changed (NOT RUN).');
+  const s = report.summary;
+  lines.push(`Summary: ${s.success} reverted, ${s.failed} failed, ${s.locked} locked, ${s.notStarted} not started`);
   return lines.join('\n');
 }
 

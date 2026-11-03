@@ -197,6 +197,90 @@ describe('run through the real binary', () => {
   });
 });
 
+describe('revert through the CLI', () => {
+  const history = async (schema: string) => (await db.client.query(`SELECT name FROM "${schema}".migrations ORDER BY id`)).rows.map((r) => r.name as string);
+
+  it('usage errors exit 2 and execute nothing: it needs exactly one --tenant and a --migration, and no batch flags', async () => {
+    const p = writeProject({ db, migrations: normal });
+    await runBin(['run', '--all', '--config', p.config]);
+    const before = await snapshotDatabase(db.client);
+    const name = M.createThings.name;
+    const bad: string[][] = [
+      ['revert', '--config', p.config, '--tenant', 'alpha'], // no --migration
+      ['revert', '--config', p.config, '--tenant', 'alpha', '--migration', ''],
+      ['revert', '--config', p.config, '--all', '--migration', name],
+      ['revert', '--config', p.config, '--migration', name],
+      ['revert', '--config', p.config, '--tenant', 'alpha', '--tenant', 'beta', '--migration', name],
+      ['revert', '--config', p.config, '--tenant', 'alpha', '--migration', name, '--concurrency', '2'],
+      ['revert', '--config', p.config, '--tenant', 'alpha', '--migration', name, '--continue-on-error'],
+      ['run', '--config', p.config, '--all', '--migration', name],
+      ['plan', '--config', p.config, '--all', '--migration', name],
+    ];
+    for (const args of bad) {
+      const r = await cli(args);
+      expect(r.code, args.join(' ')).toBe(EXIT.USAGE);
+      expect(r.stderr, args.join(' ')).toContain('INVALID_CONFIGURATION');
+    }
+    expect((await cli(['revert', '--config', p.config, '--tenant', 'nobody', '--migration', name])).code).toBe(EXIT.USAGE);
+    expect(await snapshotDatabase(db.client)).toEqual(before);
+    expect(await history('tenant_alpha')).toEqual([M.addStatus.name, M.createThings.name]);
+  });
+
+  it('reverts the named last migration of one tenant: exit 0, JSON on stdout, the other tenant untouched', async () => {
+    const p = writeProject({ db, migrations: normal });
+    await runBin(['run', '--all', '--config', p.config]);
+
+    const r = await runBin(['revert', '--tenant', 'alpha', '--migration', M.createThings.name, '--json', '--config', p.config]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.stdout);
+    expect(report.summary).toMatchObject({ total: 1, success: 1, failed: 0 });
+    expect(report.tenants[0]).toMatchObject({ tenantId: 'alpha', status: 'success', reverted: [M.createThings.name] });
+
+    expect(await tablesOf(db.client, 'tenant_alpha')).toEqual(['audit', 'migrations', 'orders']);
+    expect(await history('tenant_alpha')).toEqual([M.addStatus.name]);
+    expect(await tablesOf(db.client, 'tenant_beta')).toEqual(['audit', 'migrations', 'orders', 'things']);
+    expect(await history('tenant_beta')).toEqual([M.addStatus.name, M.createThings.name]);
+  });
+
+  it('human output, and exit 1 with REVERT_REFUSED (nothing changed) when the name is not the last executed migration', async () => {
+    const p = writeProject({ db, migrations: normal });
+    await cli(['run', '--all', '--config', p.config]);
+    const before = await snapshotDatabase(db.client);
+
+    const refused = await cli(['revert', '--tenant', 'alpha', '--migration', M.addStatus.name, '--config', p.config]);
+    expect(refused.code).toBe(EXIT.TENANT_FAILED);
+    expect(refused.stdout).toContain('FAILED');
+    expect(refused.stdout).toContain('REVERT_REFUSED');
+    expect(await snapshotDatabase(db.client)).toEqual(before);
+
+    const ok = await cli(['revert', '--tenant', 'alpha', '--migration', M.createThings.name, '--config', p.config]);
+    expect(ok.code).toBe(EXIT.OK);
+    expect(ok.stdout).toContain('reverted 1:');
+    expect(ok.stdout).toContain(M.createThings.name);
+    expect(ok.stdout).toContain('1 reverted, 0 failed');
+  });
+
+  it('exits 3 when the tenant is locked by someone else', async () => {
+    const p = writeProject({ db, migrations: normal });
+    await cli(['run', '--all', '--config', p.config]);
+    const holder = await acquireAdvisoryLock({ ...db.options }, { schema: 'tenant_alpha', timeoutMs: 0 });
+    try {
+      const r = await cli(['revert', '--tenant', 'alpha', '--migration', M.createThings.name, '--lock-timeout', '100', '--config', p.config]);
+      expect(r.code).toBe(EXIT.LOCKED);
+      expect(r.stdout).toContain('LOCKED');
+    } finally {
+      await holder.release();
+    }
+    expect(await history('tenant_alpha')).toEqual([M.addStatus.name, M.createThings.name]);
+  });
+
+  it('--help documents the command', async () => {
+    const r = await cli(['--help']);
+    expect(r.stdout).toContain('revert --config <file> --tenant <id> --migration <name>');
+    expect(r.stdout).toContain('--migration <name>');
+  });
+});
+
 describe('--help / --version', () => {
   it('exit 0', async () => {
     expect((await runBin(['--help'])).code).toBe(0);

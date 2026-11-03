@@ -113,12 +113,14 @@ const runner = new TenantMigrationRunner({
 const plan   = await runner.plan({ target: { all: true } });               // read-only
 const status = await runner.status({ target: { tenants: ['tenant-001'] } }); // read-only
 const report = await runner.run({ target: { all: true } });
+const undone = await runner.revert({ tenant: 'tenant-001', migration: 'AddOrderStatus1700000000001' }); // one tenant, one migration, see "Reverting a migration"
 if (report.summary.failed || report.summary.locked || report.summary.notStarted) process.exitCode = 1;
 ```
 
 * The constructor validates the whole configuration synchronously and throws `TenantMigrationError` (`INVALID_CONFIGURATION`, …) before any connection is opened.
 * `run()` throws only for configuration/selection problems (bad tenant list, unknown id, unsafe schema name). Everything that happens *per tenant* is returned in the report; nothing per-tenant is thrown.
 * `plan()` and `status()` return `{ startedAt, finishedAt, summary, tenants }`.
+* `revert()` returns the same envelope as `run()` with one tenant, and each tenant result has an extra `reverted: string[]`. It throws for the same kinds of problems as `run()`, plus `tenant` / `migration` that are not a tenant id / a migration name.
 
 ### NestJS
 
@@ -128,17 +130,19 @@ There is no Nest dependency. Put your `DataSourceOptions` in a module that doesn
 
 ```
 typeorm-tenant-migrations <plan|status|run> --config <file> (--all | --tenant <id> [--tenant <id>...]) [options]
+typeorm-tenant-migrations revert --config <file> --tenant <id> --migration <name> [options]
 ```
 
 | Flag | Applies to | Meaning |
 | --- | --- | --- |
 | `--config <file>` | all | Required. `.js` / `.cjs` / `.mjs`, or `.ts` if [`tsx`](https://tsx.is) is installed in your project. Exports `{ dataSource, tenants, options? }` as default / `module.exports`, or a (possibly async) function returning that. |
-| `--all` / `--tenant <id>` | all | Exactly one form is required. `--tenant` matches the logical `id`, never a schema name; repeatable. |
+| `--all` / `--tenant <id>` | all | Exactly one form is required. `--tenant` matches the logical `id`, never a schema name; repeatable. `revert` takes exactly one `--tenant` and no `--all`. |
+| `--migration <name>` | revert | Required. The migration to revert; it has to be the last executed migration of that tenant, otherwise nothing runs. |
 | `--json` | all | Report as JSON on **stdout**. Logs always go to **stderr**, so stdout stays machine-readable. |
-| `--concurrency <n>` | all | Tenants processed in parallel. Default `1`; capped by `options.maxConcurrency` (default 8). |
+| `--concurrency <n>` | plan, status, run | Tenants processed in parallel. Default `1`; capped by `options.maxConcurrency` (default 8). |
 | `--continue-on-error` | run | Keep scheduling tenants after a failure. Default: stop scheduling new ones. |
-| `--transaction <all\|each\|none>` | run | Default `each`. |
-| `--lock-timeout <ms>` | run | How long to wait for a tenant's lock. Default `30000`; `0` = try once. |
+| `--transaction <all\|each\|none>` | run, revert | Default `each`. |
+| `--lock-timeout <ms>` | run, revert | How long to wait for a tenant's lock. Default `30000`; `0` = try once. |
 
 CLI flags override `options` from the config file. Relative migration globs are resolved by TypeORM against the **current working directory**; use absolute paths (as the examples do) to be independent of where you start the process.
 
@@ -153,11 +157,31 @@ CLI flags override `options` from the config file. Relative migration globs are 
 | Code | Meaning |
 | --- | --- |
 | `0` | Every selected tenant ended successfully (`success`, or `skipped` = already up to date). `plan`/`status`: every tenant could be inspected. |
-| `1` | At least one tenant failed (migration, connection, missing schema, …) or was not started because another failed. `plan`/`status`: a tenant could not be inspected. |
+| `1` | At least one tenant failed (migration, connection, missing schema, a `revert` that a guard refused, …) or was not started because another failed. `plan`/`status`: a tenant could not be inspected. |
 | `2` | Usage / configuration / tenant-selection error. Nothing was executed. |
 | `3` | At least one tenant could not get its lock in time, and nothing failed otherwise. |
-| `130` | `run` was interrupted by `SIGINT`/`SIGTERM`; tenants that had not started were left untouched (see [Interruption](#interruption)). |
+| `130` | `run` or `revert` was interrupted by `SIGINT`/`SIGTERM`; tenants that had not started were left untouched (see [Interruption](#interruption)). |
 | `70` | Unexpected internal error. |
+
+### Error codes
+
+`error.code` in a report is one of `ERROR_CODES` (exported, and the type `TenantMigrationErrorCode` is the union of them):
+
+| Code | Raised when |
+| --- | --- |
+| `INVALID_CONFIGURATION` | The config, an option or a CLI flag is wrong. Nothing was opened. |
+| `INVALID_TENANT_TARGET` | The tenant selection is missing, ambiguous, empty or names an unknown tenant. |
+| `UNSAFE_SCHEMA_NAME` | A schema name is outside the allowed pattern or reserved. |
+| `SCHEMA_NOT_FOUND` | The tenant's schema does not exist (it is never created). |
+| `SCHEMA_CONTEXT_MISMATCH` | A connection did not come up with the requested `search_path` (or read-only mode). |
+| `CONCURRENT_MIGRATION` | The tenant's lock was not obtained in time. |
+| `UNSUPPORTED_CONNECTION_MODE` | The advisory lock is not exclusive on this connection path. |
+| `DATASOURCE_INITIALIZATION_FAILED` | The tenant's DataSource could not be created or connected. |
+| `MIGRATION_DISCOVERY_FAILED` | No migrations loaded, a bad name, or a duplicate name. |
+| `MIGRATION_FAILED` | A migration (or a `down()`) failed; the sanitized database error is in the message. |
+| `REVERT_REFUSED` | A `revert` guard refused: nothing was executed (see [Reverting a migration](#reverting-a-migration)). |
+
+New codes may be added in a minor release, so a `switch` over `error.code` should have a `default` branch. The CLI prints its own errors (exit codes `2` and `70`) as `{ "error": { "code", "message" } }` on stdout with `--json`, or as `error [CODE]: message` on stderr; for an unexpected internal error the code is `INTERNAL_ERROR`, which is not a member of `ERROR_CODES` because it is not something the package raises on purpose.
 
 ### Example output
 
@@ -246,9 +270,32 @@ Default `'tenant-only'`: `search_path` is exactly the tenant schema. An unqualif
 
 If you set `extra.options` on your DataSource, the runner appends its own `-c search_path=…` to it. A `search_path` already present in `extra.options`, in a `url` / `extra.connectionString` `options=` parameter, or an `options` parameter in the URL is a configuration **error**, not something to merge. Tenant schema names must match `^[a-z_][a-z0-9_]*$` (max 63 chars); `public`, `information_schema`, `pg_*` are never accepted as a tenant schema.
 
+## Reverting a migration
+
+`revert` undoes **one** migration on **one** tenant, and only if you name it:
+
+```bash
+typeorm-tenant-migrations revert --config ./tenants.config.js --tenant tenant-001 --migration AddOrderStatus1700000000001
+```
+
+```ts
+await runner.revert({ tenant: 'tenant-001', migration: 'AddOrderStatus1700000000001' });
+```
+
+* It is the same operation as TypeORM's `undoLastMigration`, run with this package's guarantees: a DataSource started with the tenant's `search_path`, the context check, the tenant's advisory lock, and the history read **under the lock**.
+* **The name is a confirmation, not a selector.** TypeORM reverts whatever was executed last, so a wrong name would silently revert something else. Here the name has to equal the last executed migration of that tenant (the highest `id` in its history table, which is what TypeORM reverts); otherwise nothing runs and the result is `failed` with `REVERT_REFUSED`, naming the migration that is actually last.
+* Other refusals, all with `REVERT_REFUSED` and nothing executed: the tenant has no executed migration (the history table is **not** created, which TypeORM's own call would do), or the last executed migration is not known to this build, so its `down()` is not available.
+* **One tenant, one migration.** There is no `--all`, no `--steps`, and no way to revert several tenants in one call. To revert further, call it again with the next name; `run` applies the reverted migrations again.
+* The result has the same shape as one tenant of a `run` report plus `reverted: string[]` (history rows that disappeared during the call: the reverted migration, or none). `executed` is empty. `interrupted` appears only if the signal stopped it before it started.
+* **Transactions.** Like for `run`, `--transaction` / `options.transaction` applies, and a migration that sets `transaction` itself keeps its choice (`transaction = false` → no transaction around its `down()`, so `DROP INDEX CONCURRENTLY` works). A `down()` that fails inside a transaction rolls back completely and the history is unchanged; a `down()` that is not transactional can leave partial physical state, and the history row is only removed after it succeeded. Nothing is retried.
+* **Whether `down()` does the right thing is your migration's business.** The package cannot know. A `down()` that is empty still removes the history row, and `status` will then show the migration as pending again.
+* Exit codes are those of `run`: `0` reverted, `1` failed or refused, `3` locked, `130` interrupted before it started.
+
+Tested in `test/integration/runner-revert.test.ts` and `cli.test.ts` against real PostgreSQL: every guard compares whole-database snapshots before and after, and two of the guards (the name check and the no-history check) were checked by removing them: the tests fail without them.
+
 ## Interruption
 
-* **Programmatic:** `runner.run({ target, signal })` takes an `AbortSignal`. When it aborts, no further tenant is started (they are reported `not-started`), a tenant that is only *waiting* for its lock gives up at once, and tenants already migrating **run to completion** — a migration is never cancelled midway. The report then has `interrupted: true` and is never "clean".
+* **Programmatic:** `runner.run({ target, signal })` (and `runner.revert({ …, signal })`) takes an `AbortSignal`. When it aborts, no further tenant is started (they are reported `not-started`), a tenant that is only *waiting* for its lock gives up at once, and tenants already migrating **run to completion** — a migration is never cancelled midway. The report then has `interrupted: true` and is never "clean".
 * **CLI:** the first `SIGINT`/`SIGTERM` during `run` does exactly that, prints the report and exits `130`. A second signal terminates the process immediately; if a transaction was open, PostgreSQL rolls it back when it notices the client is gone. `SIGKILL` (cannot be handled) behaves like that second signal.
 * Tested with real signals sent to the real binary in the middle of a migration: after `SIGKILL` or a double `SIGINT`, the transaction is rolled back, the lock and the sessions are gone, and the same command completes on the next run. A migration that is not transactional (`transaction: 'none'`, `CREATE INDEX CONCURRENTLY`, …) gets no rollback in any of these cases; that is the reason the first signal waits instead of killing.
 
@@ -257,7 +304,7 @@ If you set `extra.options` on your DataSource, the runner appends its own `-c se
 * **Preflight.** Before the first change, `run` inspects *every* selected tenant read-only: schema exists, `search_path` is right, migrations load. If any tenant fails that, nothing is migrated (default) and the rest are reported `not-started`. With `continueOnError`, healthy tenants still run and the broken one is reported `failed`. A DataSource that loads **zero** migrations is a failure (a mistyped glob must not look like success).
 * **Lock.** Per tenant: acquire → re-read history *under the lock* → run → release. Not acquired within `lockTimeoutMs` → status `locked` (`CONCURRENT_MIGRATION`), migration not run.
 * **During the run.** Default `continueOnError: false`: after the first `failed`/`locked` tenant no *new* tenant is started. Tenants already in flight (with `concurrency > 1`) cannot be cancelled mid-migration and are reported with their real outcome.
-* **No automatic retry, no automatic rollback.**
+* **No automatic retry, no automatic rollback.** Reverting is a separate, explicit command for one tenant ([Reverting a migration](#reverting-a-migration)); a failed `run` never reverts anything.
 * **Resume.** Fix the cause and run again. Tenants that are up to date are `skipped`; a partially migrated tenant continues from the first migration without a history record. Recorded migrations are never repeated.
 
 Common causes: `SCHEMA_NOT_FOUND` (create the schema), `SCHEMA_CONTEXT_MISMATCH` (see below), `UNSUPPORTED_CONNECTION_MODE` (the advisory lock is not exclusive on this connection path, see [Connection poolers](#connection-poolers)), `CONCURRENT_MIGRATION` (another deploy is running — wait, or check `pg_locks`/`pg_stat_activity` for a stuck holder; a dead session's lock is released by PostgreSQL), `MIGRATION_FAILED` (the sanitized database error is in the report).
@@ -314,7 +361,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 
 * PostgreSQL only (driver type `postgres`). Not CockroachDB, not the `aurora-postgres` driver type, no `replication` (read replicas) configuration — the latter is rejected.
 * **Connection poolers.** Per-tenant `search_path` relies on the `options` startup parameter being forwarded. If it isn't, the runner fails closed (`SCHEMA_CONTEXT_MISMATCH`). The advisory lock is session-level, so it needs a direct connection or *session* pooling; transaction pooling is unsupported (the runner detects that the lock is not exclusive and refuses). See [Connection poolers](#connection-poolers).
-* No cross-tenant atomicity; no `down`/rollback command (use TypeORM's CLI per tenant if you must); no drift detection; no schema/tenant discovery or creation; no run-at-startup helper.
+* **Non-goals, on purpose:** no cross-tenant atomicity (PostgreSQL cannot commit one migration atomically on many schemas); no revert of several tenants or several migrations at once (`revert` is one tenant, one migration); no drift detection (comparing the physical structure of schemas); no schema/tenant discovery or creation; no run-at-startup helper (migrations are a deploy step, never part of application startup).
 * The runner governs the connection context *before* your migrations. A migration that itself runs `SET search_path` (or schema-qualifies other tenants' names) can still do whatever it likes.
 * Pending migrations are determined with TypeORM's rule — by **name**, not by timestamp order — so a migration with an older timestamp than the newest executed one still runs. `plan`'s independent implementation of that rule is checked against what `run` really executes in the tests, on every TypeORM version in the matrix.
 * TypeORM loads entity and migration files when each tenant DataSource is initialized, so they are loaded once per tenant per phase (preflight + run); keep `entities` small in the config you use for migrations. Entities in the config are fine: with entities that include views, generated columns or uuid generation, `plan`/`status` stay read-only, `synchronize` / `dropSchema` / `installExtensions` from your config are overridden (no entity-only table is created, no extension installed), and TypeORM's own bookkeeping table `typeorm_metadata` is created **inside each tenant schema** (never in `public`) when `run` executes against such entities. All tested.

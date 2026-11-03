@@ -1,3 +1,5 @@
+import type { TenantMigrationErrorCode } from '../errors/index.js';
+
 export type TenantRunStatus = 'success' | 'failed' | 'locked' | 'skipped' | 'not-started';
 
 export interface TenantMigrationResult {
@@ -14,10 +16,19 @@ export interface TenantMigrationResult {
   finishedAt?: string;
   durationMs?: number;
   error?: {
-    code: string;
+    code: TenantMigrationErrorCode;
     /** Sanitized: connection strings, passwords and URLs are removed. */
     message: string;
   };
+}
+
+/**
+ * Result of `revert` for its one tenant. `status` 'success' = the migration was reverted; 'failed' with code
+ * REVERT_REFUSED = a guard refused and nothing was executed.
+ */
+export interface TenantRevertResult extends TenantMigrationResult {
+  /** Migrations whose history row disappeared during this call (history before minus history after): the reverted one, or none. */
+  reverted: string[];
 }
 
 export interface TenantMigrationRunSummary {
@@ -37,6 +48,11 @@ export interface TenantMigrationRunReport {
   /** Present (true) only when the run was stopped through its AbortSignal: tenants not yet started are `not-started`. */
   interrupted?: true;
   tenants: TenantMigrationResult[];
+}
+
+/** Same envelope as the report of `run`, with one tenant. */
+export interface TenantRevertReport extends Omit<TenantMigrationRunReport, 'tenants'> {
+  tenants: TenantRevertResult[];
 }
 
 export function summarize(results: readonly TenantMigrationResult[]): TenantMigrationRunSummary {
