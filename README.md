@@ -2,7 +2,7 @@
 
 Run your normal **TypeORM migrations** across a PostgreSQL database that uses **one schema per tenant** — one tenant, a few, or all of them — with the guard rails a multi-tenant deploy needs.
 
-> **Status: `0.1.0-alpha.3`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux x64, 16 on Linux arm64, and 16 and 18 on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
+> **Status: `0.1.0-alpha.4`.** The behavior described below is covered by automated tests that were run against real PostgreSQL 12 through 18 on Linux x64, 16 on Linux arm64, and 16 and 18 on macOS and Windows (see [Compatibility](#compatibility)). It is an alpha: read [Known limitations](#known-limitations) before pointing it at production data, and try it on a copy first.
 
 ## The problem
 
@@ -375,7 +375,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 
 Everything below was **actually run**; nothing is inferred. The suite is unit + integration + CLI tests against a real database.
 
-### GitHub Actions (last verified at commit `69e03e7`: all 23 jobs green)
+### GitHub Actions (last verified at commit `f37c064`, CI run 41: all 23 jobs green: all 23 jobs green)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
@@ -398,11 +398,11 @@ All rows above run on Ubuntu x64 with the `postgres:<major>` image as a service 
 
 | Runner | PostgreSQL | Node | TypeORM / pg | Result (read from the job logs) | Not exercised there |
 | --- | --- | --- | --- | --- | --- |
-| macOS (`macos-latest`, Apple silicon) | 16.15 (Homebrew; password auth enabled in `pg_hba.conf`; TLS with a self-signed certificate) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | 326 / 326 pass, nothing skipped; PgBouncer 1.26.1 (Homebrew) | – |
-| macOS | 18.6 (Homebrew; same setup) | 22 | same | 326 / 326 pass, nothing skipped; PgBouncer 1.26.1 | – |
-| Windows (`windows-latest`) | 16.15 (Chocolatey 16.15.5; TLS with a self-signed certificate) | 22 | same | 315 passed, 11 skipped (8 PgBouncer + 3 signal tests) | PgBouncer (no Windows build in CI); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
-| Windows | 18.6 (Chocolatey 18.6.5; same setup) | 22 | same | 315 passed, 11 skipped (same) | same |
-| Linux arm64 (`ubuntu-24.04-arm`) | 16.15 (`postgres:16` image, `aarch64`) | 22 | same | 309 passed, 5 skipped (the 5 TLS tests, which the x64 TLS job runs) in the run at `45525f4`; PgBouncer 1.22.0 | TLS (x64 only) |
+| macOS (`macos-latest`, Apple silicon) | 16.15 (Homebrew; password auth enabled in `pg_hba.conf`; TLS with a self-signed certificate) | 22 | `npm ci` lockfile versions (TypeORM 0.3.31) | 376 / 376 pass, nothing skipped; PgBouncer 1.26.1 (Homebrew) | – |
+| macOS | 18.6 (Homebrew; same setup) | 22 | same | 376 / 376 pass, nothing skipped; PgBouncer 1.26.1 | – |
+| Windows (`windows-latest`) | 16.15 (Chocolatey 16.15.5; TLS with a self-signed certificate) | 22 | same | 365 passed, 11 skipped (8 PgBouncer + 3 signal tests) | PgBouncer (no Windows build in CI); the real-signal tests (`SIGINT`/`SIGTERM` to a child process are an unconditional terminate on Windows, so graceful interruption by signal is **not tested on Windows**) |
+| Windows | 18.6 (Chocolatey 18.6.5; same setup) | 22 | same | 365 passed, 11 skipped (same) | same |
+| Linux arm64 (`ubuntu-24.04-arm`) | 16.15 (`postgres:16` image, `aarch64`) | 22 | same | 371 passed, 5 skipped (the 5 TLS tests, which the x64 TLS job runs); PgBouncer 1.22.0 | TLS (x64 only) |
 
 Running these jobs for the first time also showed two things: the TLS sampling test needed a minimum calibrated on the slowest runner (a quiet Linux machine saw 39-48 sessions in 1.5 s, the two Windows runners 6 and 16), and PgBouncer's behavior is not stable across versions (see [Connection poolers](#connection-poolers)).
 
@@ -410,16 +410,16 @@ The run found and fixed Windows problems that Linux could not show: `tsImport` n
 
 "latest" means whatever npm resolved when the job ran (`typeorm@0.3`, `typeorm@1`, `pg@8`), and PostgreSQL/Node are the `postgres:<major>` images and `setup-node` major versions. Every test job asserts the installed versions (`scripts/assert-versions.mjs`) and fails if they differ from its matrix entry. Read from the job logs of the run at `54d8c14`: `latest 0.3.x` = TypeORM 0.3.31, `latest 1.x` = TypeORM 1.1.2, `latest 8.x` = pg 8.23.1, the `postgres:16` image = PostgreSQL 16.15, Node 22 = 22.23.4, Node 20 = 20.20.2, Node 24 = 24.22.1 (the patch versions of the PostgreSQL majors other than 16 were not read). Before that commit the workflow installed TypeORM and `pg` with two separate `npm install --no-save` calls, and the second silently put TypeORM back to the lockfile version, so every earlier CI run exercised TypeORM 0.3.31 whatever the matrix said; the TypeORM 0.3.20 and 1.x rows above are therefore backed by CI only from that commit on (the local runs below were always done with the stated version). The test jobs install PgBouncer and run with `TTM_REQUIRE_PGBOUNCER=1`, so the PgBouncer tests cannot be skipped silently; a separate `tls` job turns TLS on in the PostgreSQL service and runs the TLS tests with `TTM_REQUIRE_SSL=1`. Two more jobs install the packed tarball into a clean directory with TypeORM 0.3 and 1 and run the README flow (CLI `plan`/`run`/`status`, CJS `require`, ESM `import`, programmatic API) against PostgreSQL 16, and one job runs lint, typecheck, build and `npm pack --dry-run`.
 
-### Local runs with exact versions (314 tests each)
+### Local runs with exact versions (376 tests each)
 
 | TypeORM | pg | PostgreSQL | Node | Result |
 | --- | --- | --- | --- | --- |
-| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
-| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
-| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
-| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 314 / 314 pass |
-| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 314 / 314 pass |
-| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 314 / 314 pass |
+| 0.3.20 | 8.23.1 | 16.15 | 22.22 | 376 / 376 pass |
+| 0.3.31 | 8.23.1 | 16.15 | 22.22 | 376 / 376 pass |
+| 1.0.0 | 8.23.1 | 16.15 | 22.22 | 376 / 376 pass |
+| 1.1.2 | 8.23.1 | 16.15 | 22.22 | 376 / 376 pass |
+| 0.3.31 | 8.5.1 | 16.15 | 22.22 | 376 / 376 pass |
+| 0.3.31 | 8.11.5 | 16.15 | 22.22 | 376 / 376 pass |
 
 `pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12; Node 20 and 24 on macOS and Windows (they run only on Linux x64); macOS on Intel, Windows on ARM; PgBouncer on Windows; connection poolers other than PgBouncer, and PgBouncer versions other than 1.22.0, 1.25.1 and 1.26.1; graceful interruption by signal on Windows.
 

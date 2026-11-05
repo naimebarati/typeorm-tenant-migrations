@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.4
+
+This release changes the package's code and, while the API is still an alpha, several names. **Read the "Breaking" items before upgrading from `0.1.0-alpha.3`:** a program that reads the `--json` output or the report objects, or that passes a config with extra keys, needs a change. What to change: `status === 'not-started'` → `'notStarted'`; for `plan()`/`status()` results `status === 'ok'` → `'success'` and `summary.ok` → `summary.success`; remove any config key other than `dataSource`, `tenants`, `options`; do not use `runner.resolvedOptions` or a `debug` logger method (never called).
 
 * **New: `revert`** (`runner.revert({ tenant, migration, signal? })` and `typeorm-tenant-migrations revert --tenant <id> --migration <name>`): reverts one migration on one tenant, only if the named migration is the last executed one of that tenant's history. Same DataSource, context check and advisory lock as `run`; refuses (`REVERT_REFUSED`, nothing executed) when the name is not the last executed migration, when there is no history (TypeORM's own undo would create the table), or when the migration is not known to this build. No `--all`, no steps. Exports `RevertParams`, `TenantRevertReport`, `TenantRevertResult`.
 * New error code `REVERT_REFUSED`.
