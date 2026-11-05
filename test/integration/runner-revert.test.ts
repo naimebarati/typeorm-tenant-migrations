@@ -210,7 +210,7 @@ describe('revert: when down() fails or the tenant is busy', () => {
     expect(await historyOf('tenant_alpha')).toEqual([A, T, B]);
   });
 
-  it('a signal that aborts while the revert waits for the lock: gives up at once, not-started, the holder untouched', async () => {
+  it('a signal that aborts while the revert waits for the lock: gives up at once, notStarted, the holder untouched', async () => {
     await migrateAll();
     const before = await snapshotDatabase(db.client);
     const holder = await acquireAdvisoryLock({ ...db.options }, { schema: 'tenant_alpha', timeoutMs: 0 });
@@ -224,7 +224,7 @@ describe('revert: when down() fails or the tenant is busy', () => {
 
       expect(Date.now() - started).toBeLessThan(3000); // not the 30 s lock timeout
       expect(report.interrupted).toBe(true);
-      expect(report.tenants[0]).toMatchObject({ status: 'not-started', reverted: [] });
+      expect(report.tenants[0]).toMatchObject({ status: 'notStarted', reverted: [] });
       expect(report.tenants[0]!.error).toBeUndefined();
       expect(report.tenants[0]!.startedAt).toBeUndefined();
     } finally {
@@ -277,7 +277,7 @@ describe('revert: when down() fails or the tenant is busy', () => {
     controller.abort();
     const report = await makeRunner({ db, migrations }).revert({ tenant: 'alpha', migration: B, signal: controller.signal });
     expect(report.interrupted).toBe(true);
-    expect(report.tenants[0]).toMatchObject({ status: 'not-started', reverted: [] });
+    expect(report.tenants[0]).toMatchObject({ status: 'notStarted', reverted: [] });
     expect(await snapshotDatabase(db.client)).toEqual(before);
     expect(await historyOf('tenant_alpha')).toEqual([A, T, B]);
   });

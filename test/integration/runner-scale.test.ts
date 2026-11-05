@@ -106,7 +106,7 @@ describe(`${TENANTS} tenants`, () => {
     const runner = makeRunner({ db, migrations: set, tenants, options: { concurrency: 8 } });
     const before = (await db.client.query('SELECT count(*)::int AS n FROM pg_class')).rows[0].n;
     const plan = await runner.plan({ target: { all: true } });
-    expect(plan.summary).toMatchObject({ ok: TENANTS, failed: 0, pendingTotal: TENANTS * 2 });
+    expect(plan.summary).toMatchObject({ success: TENANTS, failed: 0, pendingTotal: TENANTS * 2 });
     expect((await db.client.query('SELECT count(*)::int AS n FROM pg_class')).rows[0].n).toBe(before);
     const report = await runner.run({ target: { all: true } });
     expect(report.tenants.every((t, i) => t.executed.join() === plan.tenants[i]!.pending.join())).toBe(true);

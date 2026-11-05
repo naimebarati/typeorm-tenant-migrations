@@ -57,7 +57,7 @@ describe('a DataSource config that has entities (views, generated columns, uuid 
   it('plan and status are still read-only', async () => {
     const before = await snapshotDatabase(db.client);
     const runner = makeRunner({ db, migrations: [CreateOrders], tenants: [ALPHA, BETA], base: withEntities() });
-    expect((await runner.plan({ target: ALL })).summary).toMatchObject({ ok: 2, failed: 0, pendingTotal: 2 });
+    expect((await runner.plan({ target: ALL })).summary).toMatchObject({ success: 2, failed: 0, pendingTotal: 2 });
     expect((await runner.status({ target: ALL })).summary.failed).toBe(0);
     expect(await snapshotDatabase(db.client)).toEqual(before);
   });

@@ -85,7 +85,7 @@ describe.skipIf(!posix).each(['SIGINT', 'SIGTERM'] as const)('%s during a multi-
     expect(ended.stderr).toContain(`Received ${signal}`);
     const report = JSON.parse(ended.stdout);
     expect(report.interrupted).toBe(true);
-    expect(report.tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'not-started', 'not-started']);
+    expect(report.tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'notStarted', 'notStarted']);
     expect(report.summary).toMatchObject({ success: 1, notStarted: 2, failed: 0 });
 
     // alpha was NOT cut off mid-statement: it committed completely. The others were never touched.

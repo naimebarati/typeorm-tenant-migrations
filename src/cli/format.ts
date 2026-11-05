@@ -2,7 +2,7 @@ import type { TenantInspectionReport, TenantPlanEntry, TenantStatusEntry } from 
 import type { TenantMigrationRunReport, TenantRevertReport } from '../runner/report.js';
 
 const LABEL: Record<string, string> = Object.fromEntries(
-  Object.entries({ success: 'OK', ok: 'OK', skipped: 'UPTODATE', failed: 'FAILED', locked: 'LOCKED', 'not-started': 'NOT RUN' }).map(([k, v]) => [k, v.padEnd(8)]),
+  Object.entries({ success: 'OK', skipped: 'UPTODATE', failed: 'FAILED', locked: 'LOCKED', 'notStarted': 'NOT RUN' }).map(([k, v]) => [k, v.padEnd(8)]),
 );
 
 const list = (items: readonly string[], indent = '      ') => items.map((i) => `${indent}- ${i}`);

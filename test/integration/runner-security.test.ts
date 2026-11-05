@@ -148,9 +148,9 @@ describe('least-privilege role', () => {
         dataSource: { ...db.options, username: limited, password: 'Limited-Role-Pw-1', migrations: goodMigrations },
         tenants: [ALPHA, { id: 'beta', schema: 'tenant_beta' }],
       });
-      expect((await runner.plan({ target: ALL })).summary).toMatchObject({ ok: 2, failed: 0, pendingTotal: 6 });
+      expect((await runner.plan({ target: ALL })).summary).toMatchObject({ success: 2, failed: 0, pendingTotal: 6 });
       expect((await runner.run({ target: ALL })).summary).toMatchObject({ success: 2, failed: 0 });
-      expect((await runner.status({ target: ALL })).summary).toMatchObject({ ok: 2, pendingTotal: 0 });
+      expect((await runner.status({ target: ALL })).summary).toMatchObject({ success: 2, pendingTotal: 0 });
       // The role has no rights on public: nothing could have leaked there, and nothing changed.
       expect((await db.client.query('SELECT count(*) FROM public.orders')).rows[0].count).toBe('0');
     } finally {

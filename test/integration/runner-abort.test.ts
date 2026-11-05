@@ -39,7 +39,7 @@ describe('run({ signal })', () => {
     c.abort();
     const report = await makeRunner({ db, migrations: goodMigrations, tenants: three }).run({ target: ALL, signal: c.signal });
 
-    expect(statuses(report)).toEqual(['not-started', 'not-started', 'not-started']);
+    expect(statuses(report)).toEqual(['notStarted', 'notStarted', 'notStarted']);
     expect(report.interrupted).toBe(true);
     expect(await snapshotDatabase(db.client)).toEqual(before);
     expect(await waitForNoSessions(db)).toBe(0);
@@ -52,7 +52,7 @@ describe('run({ signal })', () => {
     c.abort();
     const report = await running;
 
-    expect(statuses(report)).toEqual(['success', 'not-started', 'not-started']);
+    expect(statuses(report)).toEqual(['success', 'notStarted', 'notStarted']);
     expect(report.interrupted).toBe(true);
     expect(report.summary).toMatchObject({ success: 1, notStarted: 2 });
     expect(await auditCount('tenant_alpha')).toBe(1);
@@ -68,11 +68,11 @@ describe('run({ signal })', () => {
     c.abort();
     const report = await running;
 
-    expect(statuses(report)).toEqual(['success', 'success', 'not-started']);
+    expect(statuses(report)).toEqual(['success', 'success', 'notStarted']);
     expect(await auditCount('tenant_gamma')).toBe(0);
   });
 
-  it('abort while waiting for a lock: gives up at once, the tenant is not-started (not locked, not failed), the holder is untouched', async () => {
+  it('abort while waiting for a lock: gives up at once, the tenant is notStarted (not locked, not failed), the holder is untouched', async () => {
     const holder = await acquireAdvisoryLock({ ...db.options }, { schema: 'tenant_alpha', timeoutMs: 0 });
     try {
       const c = new AbortController();
@@ -83,7 +83,7 @@ describe('run({ signal })', () => {
       const report = await running;
 
       expect(Date.now() - started).toBeLessThan(3000); // not the 30 s lock timeout
-      expect(report.tenants[0]).toMatchObject({ status: 'not-started', executed: [] });
+      expect(report.tenants[0]).toMatchObject({ status: 'notStarted', executed: [] });
       expect(report.tenants[0]!.error).toBeUndefined();
       expect(report.tenants[0]!.startedAt).toBeUndefined();
       expect(report.interrupted).toBe(true);

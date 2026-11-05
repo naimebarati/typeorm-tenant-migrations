@@ -16,9 +16,8 @@ const codeOf = (fn: () => unknown) => {
 };
 
 describe('TenantMigrationRunner constructor (no database access)', () => {
-  it('accepts a minimal valid config and exposes conservative resolved options', () => {
-    const runner = new TenantMigrationRunner({ dataSource: pg, tenants });
-    expect(runner.resolvedOptions).toMatchObject({ concurrency: 1, transaction: 'each', continueOnError: false, searchPathMode: 'tenant-only' });
+  it('accepts a minimal valid config (the conservative defaults themselves are pinned in options.test.ts)', () => {
+    expect(() => new TenantMigrationRunner({ dataSource: pg, tenants })).not.toThrow();
   });
 
   it.each([
@@ -28,6 +27,8 @@ describe('TenantMigrationRunner constructor (no database access)', () => {
     ['unsupported driver', { dataSource: { type: 'mysql' }, tenants }],
     ['replication', { dataSource: { ...pg, replication: { master: {}, slaves: [] } }, tenants }],
     ['bad option', { dataSource: pg, tenants, options: { concurrency: 0 } }],
+    ['misspelled top-level key', { dataSource: pg, tenants, option: { concurrency: 5 } }],
+    ['misspelled tenants key', { dataSource: pg, tenants, tenent: [] }],
     ['unknown option', { dataSource: pg, tenants, options: { retries: 3 } }],
     ['bad history table name', { dataSource: { ...pg, migrationsTableName: 'x"; DROP' }, tenants }],
     ['search_path in extra.options', { dataSource: { ...pg, extra: { options: '-c search_path=public' } }, tenants }],

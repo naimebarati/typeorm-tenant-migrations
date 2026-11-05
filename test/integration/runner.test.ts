@@ -87,7 +87,7 @@ describe('plan / status parity with run', () => {
       expect(entry.pendingCount).toBe(3);
       expect(report.tenants[i]!.executed).toEqual(entry.pending);
     }
-    expect(plan.summary).toMatchObject({ total: 2, ok: 2, failed: 0, pendingTotal: 6 });
+    expect(plan.summary).toMatchObject({ total: 2, success: 2, failed: 0, pendingTotal: 6 });
   });
 
   it('status reports executed, pending and history-table presence', async () => {
@@ -136,7 +136,7 @@ describe('plan / status are read-only', () => {
     const runner = makeRunner({ db, migrations: goodMigrations, tenants: [ALPHA, { id: 'ghost', schema: 'tenant_ghost' }] });
     const plan = await runner.plan({ target: ALL });
     expect(plan.tenants[1]).toMatchObject({ tenantId: 'ghost', status: 'failed', error: { code: 'SCHEMA_NOT_FOUND' } });
-    expect(plan.summary).toMatchObject({ ok: 1, failed: 1 });
+    expect(plan.summary).toMatchObject({ success: 1, failed: 1 });
     expect(await snapshotDatabase(db.client)).toEqual(before);
   });
 });
@@ -148,9 +148,9 @@ describe('preflight', () => {
     const report = await runner.run({ target: ALL });
 
     expect(report.tenants.map((t) => [t.tenantId, t.status])).toEqual([
-      ['alpha', 'not-started'],
+      ['alpha', 'notStarted'],
       ['ghost', 'failed'],
-      ['beta', 'not-started'],
+      ['beta', 'notStarted'],
     ]);
     expect(report.tenants[1]!.error?.code).toBe('SCHEMA_NOT_FOUND');
     expect(await snapshotDatabase(db.client)).toEqual(before); // not even alpha was migrated

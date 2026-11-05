@@ -29,7 +29,7 @@ export function capturingLogger(): TenantMigrationLogger & { lines: string[] } {
   const push = (level: string) => (message: string, meta?: Record<string, unknown>) => {
     lines.push(`${level} ${message}${meta ? ' ' + JSON.stringify(meta) : ''}`);
   };
-  return { lines, debug: push('DEBUG'), info: push('INFO'), warn: push('WARN'), error: push('ERROR') };
+  return { lines, info: push('INFO'), warn: push('WARN'), error: push('ERROR') };
 }
 
 export const ALL = { all: true } as const;

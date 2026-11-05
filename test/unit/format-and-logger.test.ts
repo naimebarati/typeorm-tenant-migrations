@@ -12,7 +12,7 @@ describe('formatRun', () => {
     { ...base, tenantId: 'b', schema: 'tenant_b', status: 'skipped' },
     { ...base, tenantId: 'c', schema: 'tenant_c', status: 'failed', pendingBeforeRun: ['M1', 'M2', 'M3'], executed: ['M1'], error: { code: 'MIGRATION_FAILED', message: 'boom' } },
     { ...base, tenantId: 'd', schema: 'tenant_d', status: 'locked', error: { code: 'CONCURRENT_MIGRATION', message: 'busy' } },
-    { ...base, tenantId: 'e', schema: 'tenant_e', status: 'not-started' },
+    { ...base, tenantId: 'e', schema: 'tenant_e', status: 'notStarted' },
     { ...base, tenantId: 'f', schema: 'tenant_f', status: 'failed', pendingBeforeRun: ['M1'], executedKnown: false, error: { code: 'MIGRATION_FAILED', message: 'gone' } },
   ];
   const text = formatRun({ runId: 'r1', startedAt: '', finishedAt: '', summary: summarize(tenants), tenants });
@@ -37,8 +37,8 @@ describe('formatRun', () => {
 });
 
 describe('formatPlan / formatStatus', () => {
-  const entry = { tenantId: 'a', schema: 'tenant_a', status: 'ok' as const, pending: ['M1'], pendingCount: 1 };
-  const summary = { total: 2, ok: 1, failed: 1, pendingTotal: 1 };
+  const entry = { tenantId: 'a', schema: 'tenant_a', status: 'success' as const, pending: ['M1'], pendingCount: 1 };
+  const summary = { total: 2, success: 1, failed: 1, pendingTotal: 1 };
   const failed = { tenantId: 'z', schema: 'tenant_z', status: 'failed' as const, pending: [], pendingCount: 0, error: { code: 'SCHEMA_NOT_FOUND' as const, message: 'nope' } };
 
   it('plan lists pending migrations and states that nothing was changed', () => {
@@ -76,20 +76,18 @@ describe('loggers', () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it('the console logger writes to stderr only, with metadata, and debug only on request', () => {
+  it('the console logger writes to stderr only, with metadata', () => {
     const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const logger = createConsoleLogger();
     logger.info('hello', { a: 1 });
     logger.warn('careful');
     logger.error('bad');
-    expect(logger.debug).toBeUndefined();
-    createConsoleLogger({ debug: true }).debug?.('details');
+    expect('debug' in logger).toBe(false); // the package has no debug level
     const lines = err.mock.calls.map((c) => String(c[0]));
     expect(lines[0]).toBe('[typeorm-tenant-migrations] INFO hello {"a":1}\n');
     expect(lines[1]).toContain('WARN careful');
     expect(lines[2]).toContain('ERROR bad');
-    expect(lines[3]).toContain('DEBUG details');
     expect(out).not.toHaveBeenCalled();
   });
 

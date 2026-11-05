@@ -85,6 +85,11 @@ export async function loadConfig(configPath: string, cwd: string): Promise<Tenan
     const next = (exported as { default?: unknown } | null)?.default;
     if (next !== undefined && !('tenants' in (exported as object))) exported = next;
   }
+  // A module namespace (Node's import() of CommonJS, or an ES module with named exports) carries loader artifacts next to
+  // the user's keys; drop those so that the runner's check for unknown config keys sees only what the user wrote.
+  if (Object.prototype.toString.call(exported) === '[object Module]') {
+    exported = Object.fromEntries(Object.entries(exported as object).filter(([key]) => key !== 'default' && key !== 'module.exports'));
+  }
   if (typeof exported === 'function') {
     try {
       exported = await (exported as () => unknown)();

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validateOptions, validateTableName } from '../config/validate-config.js';
-import type { ResolvedOptions, TenantMigrationRunnerConfig, TenantMigrationTarget, TenantProvider, TenantSelection } from '../config/types.js';
+import type { TenantMigrationRunnerConfig, TenantMigrationTarget, TenantProvider, TenantSelection } from '../config/types.js';
 import { TenantMigrationError, type TenantMigrationErrorCode } from '../errors/index.js';
 import { createRedactor } from '../errors/sanitize.js';
 import { warnIfConnectionBudgetIsTight } from '../postgres/connection-budget.js';
@@ -19,7 +19,7 @@ export interface TargetParams {
 
 export interface RunParams extends TargetParams {
   /**
-   * Graceful stop. When aborted, no further tenant is started (they are reported `not-started`),
+   * Graceful stop. When aborted, no further tenant is started (they are reported `notStarted`),
    * a tenant waiting for its lock gives up, and tenants already migrating run to completion:
    * a migration is never cancelled midway. The report carries `interrupted: true`.
    */
@@ -41,7 +41,7 @@ export interface RevertParams {
 export interface TenantPlanEntry {
   tenantId: string;
   schema: string;
-  status: 'ok' | 'failed';
+  status: 'success' | 'failed';
   pending: string[];
   pendingCount: number;
   error?: { code: TenantMigrationErrorCode; message: string };
@@ -59,7 +59,7 @@ export interface TenantStatusEntry extends TenantPlanEntry {
 export interface TenantInspectionReport<T> {
   startedAt: string;
   finishedAt: string;
-  summary: { total: number; ok: number; failed: number; pendingTotal: number };
+  summary: { total: number; success: number; failed: number; pendingTotal: number };
   tenants: T[];
 }
 
@@ -75,6 +75,11 @@ export class TenantMigrationRunner {
     if (!config || typeof config !== 'object') {
       throw new TenantMigrationError('INVALID_CONFIGURATION', 'A runner config object is required.');
     }
+    for (const key of Object.keys(config)) {
+      if (key !== 'dataSource' && key !== 'tenants' && key !== 'options') {
+        throw new TenantMigrationError('INVALID_CONFIGURATION', `Unknown config key ${JSON.stringify(key.slice(0, 40))}: only "dataSource", "tenants" and "options" are accepted (a typo must not silently fall back to the defaults).`);
+      }
+    }
     if (config.tenants === undefined || (typeof config.tenants !== 'function' && !Array.isArray(config.tenants))) {
       throw new TenantMigrationError('INVALID_CONFIGURATION', '"tenants" must be an array or a function returning one.');
     }
@@ -87,10 +92,6 @@ export class TenantMigrationRunner {
 
     this.tenants = config.tenants;
     this.ctx = { base, options, logger, redact: createRedactor(collectSecrets(base)), historyTable };
-  }
-
-  get resolvedOptions(): Readonly<ResolvedOptions> {
-    return this.ctx.options;
   }
 
   /** What `run` would execute, per tenant. Read-only: never creates a table or schema. */
@@ -115,7 +116,7 @@ export class TenantMigrationRunner {
       finishedAt: new Date().toISOString(),
       summary: {
         total: tenants.length,
-        ok: tenants.filter((t) => t.status === 'ok').length,
+        success: tenants.filter((t) => t.status === 'success').length,
         failed: tenants.filter((t) => t.status === 'failed').length,
         pendingTotal: tenants.reduce((n, t) => n + t.pendingCount, 0),
       },
@@ -173,7 +174,7 @@ export class TenantMigrationRunner {
       );
     }
 
-    const tenants = targets.map((t, i) => results[i] ?? { ...baseResult(t), status: 'not-started' as const });
+    const tenants = targets.map((t, i) => results[i] ?? { ...baseResult(t), status: 'notStarted' as const });
     const report: TenantMigrationRunReport = {
       runId,
       startedAt,
@@ -211,7 +212,7 @@ export class TenantMigrationRunner {
       finishedAt: new Date().toISOString(),
       summary: summarize([result]),
       // Interrupted only if the signal kept the revert from starting; a revert that ran to the end is complete.
-      ...(result.status === 'not-started' ? { interrupted: true as const } : {}),
+      ...(result.status === 'notStarted' ? { interrupted: true as const } : {}),
       tenants: [result],
     };
     this.ctx.logger.info(`Revert ${runId} finished: ${JSON.stringify(report.summary)}`);
@@ -242,7 +243,7 @@ export class TenantMigrationRunner {
 }
 
 function baseResult(target: TenantMigrationTarget): TenantMigrationResult {
-  return { tenantId: target.id, schema: target.schema, status: 'not-started', pendingBeforeRun: [], executed: [], executedKnown: true };
+  return { tenantId: target.id, schema: target.schema, status: 'notStarted', pendingBeforeRun: [], executed: [], executedKnown: true };
 }
 
 function fromFailedPreflight(target: TenantMigrationTarget, inspection: TenantInspection): TenantMigrationResult {

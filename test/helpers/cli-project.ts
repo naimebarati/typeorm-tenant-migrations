@@ -72,7 +72,7 @@ export function writeProject({ db, kind = 'cjs', migrationFormat = 'cjs', migrat
     mjs: `export default ${json};\n`,
     'mjs-tla': `const config = await Promise.resolve(${json});\nexport default config;\n`,
     ts: `const config: { dataSource: object; tenants: Array<{ id: string; schema: string }>; options?: object } = ${json};\nexport default config;\n`,
-    'ts-enum': `enum Mode { Plain = 'plain' }\nconst body = ${json};\nconst config = { ...body, mode: Mode.Plain };\nexport default config;\n`,
+    'ts-enum': `enum Mode { Plain = 'plain' }\nconst body = ${json};\nconst config = { ...body, options: { ...body.options, searchPathMode: Mode.Plain === 'plain' ? 'tenant-only' : 'tenant-first' } };\nexport default config;\n`,
     'async-fn': `module.exports = async () => (${json});\n`,
   }[kind];
   writeFileSync(path.join(dir, file), text);

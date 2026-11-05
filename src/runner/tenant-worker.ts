@@ -25,7 +25,7 @@ export interface RunnerContext {
 export interface TenantInspection {
   tenantId: string;
   schema: string;
-  status: 'ok' | 'failed';
+  status: 'success' | 'failed';
   /** Every migration known to the app, in execution order. */
   known: string[];
   executed: string[];
@@ -88,7 +88,7 @@ export async function inspectTenant(ctx: RunnerContext, target: TenantMigrationT
     const known = discoverMigrations(ds);
     return {
       ...base,
-      status: 'ok',
+      status: 'success',
       known: known.map((m) => m.name),
       executed: (executed ?? []).map((m) => m.name),
       pending: computePending(known, executed),
@@ -143,7 +143,7 @@ export async function executeTenant(ctx: RunnerContext, target: TenantMigrationT
   let neverStarted = false;
 
   if (signal?.aborted) {
-    return { ...result, status: 'not-started', startedAt: undefined };
+    return { ...result, status: 'notStarted', startedAt: undefined };
   }
 
   try {
@@ -185,7 +185,7 @@ export async function executeTenant(ctx: RunnerContext, target: TenantMigrationT
     if (signal?.aborted && !migrationStarted && result.error.code === 'CONCURRENT_MIGRATION') {
       // Interrupted while still waiting for the lock: this tenant was never touched.
       neverStarted = true;
-      result.status = 'not-started';
+      result.status = 'notStarted';
       result.error = undefined;
       return result;
     }
@@ -257,7 +257,7 @@ export async function revertTenant(
   let neverStarted = false;
 
   if (signal?.aborted) {
-    return { ...result, status: 'not-started', startedAt: undefined };
+    return { ...result, status: 'notStarted', startedAt: undefined };
   }
 
   try {
@@ -318,7 +318,7 @@ export async function revertTenant(
 
     if (signal?.aborted && !revertStarted && result.error.code === 'CONCURRENT_MIGRATION') {
       neverStarted = true;
-      result.status = 'not-started';
+      result.status = 'notStarted';
       result.error = undefined;
       return result;
     }

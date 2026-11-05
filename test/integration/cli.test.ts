@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { acquireAdvisoryLock } from '../../src/postgres/advisory-lock.js';
 import { EXIT, runCli } from '../../src/cli/main.js';
@@ -51,7 +52,6 @@ describe('usage and configuration errors (exit 2, nothing executed)', () => {
     const p = writeProject({ db, migrations: normal });
     expect((await cli(['run', '--all', '--config', '/nope/missing.cjs'])).code).toBe(EXIT.USAGE);
 
-    const { writeFileSync } = await import('node:fs');
     const broken = `${p.dir}/broken.cjs`;
     writeFileSync(broken, `throw new Error('postgres://u:hunter2@h/d exploded');`);
     const r = await cli(['run', '--all', '--config', broken]);
@@ -61,6 +61,28 @@ describe('usage and configuration errors (exit 2, nothing executed)', () => {
     const wrong = `${p.dir}/wrong.cjs`;
     writeFileSync(wrong, `module.exports = { hello: 1 };`);
     expect((await cli(['run', '--all', '--config', wrong])).code).toBe(EXIT.USAGE);
+  });
+
+  it('rejects a misspelled top-level key of the config file instead of running with the defaults', async () => {
+    const p = writeProject({ db, migrations: normal });
+    const typo = `${p.dir}/typo.cjs`;
+    writeFileSync(typo, `module.exports = { dataSource: ${JSON.stringify({ ...db.options, migrations: [] })}, tenants: [{ id: 'alpha', schema: 'tenant_alpha' }], option: { concurrency: 5 } };`);
+    const before = await snapshotDatabase(db.client);
+    const r = await cli(['run', '--all', '--config', typo]);
+    expect(r.code).toBe(EXIT.USAGE);
+    expect(r.stderr).toContain('INVALID_CONFIGURATION');
+    expect(r.stderr).toContain('"option"');
+    expect(await snapshotDatabase(db.client)).toEqual(before);
+  });
+
+  it('accepts a config written as ES module named exports', async () => {
+    const p = writeProject({ db, migrations: normal });
+    const named = `${p.dir}/named.mjs`;
+    const migrationsGlob = `${p.dir}/migrations/*.js`.split('\\').join('/');
+    writeFileSync(named, `export const dataSource = ${JSON.stringify({ ...db.options, migrations: [migrationsGlob] })};\nexport const tenants = [{ id: 'alpha', schema: 'tenant_alpha' }];\n`);
+    const r = await cli(['plan', '--all', '--json', '--config', named]);
+    expect(r.code).toBe(EXIT.OK);
+    expect(JSON.parse(r.stdout).summary).toMatchObject({ total: 1, success: 1 });
   });
 
   it('validates numeric flags and flag/command combinations', async () => {
@@ -94,7 +116,7 @@ describe('config loading', () => {
     const r = await cli(['plan', '--all', '--json', '--config', p.config]);
     expect(r.stderr).toBe('');
     expect(r.code).toBe(EXIT.OK);
-    expect(JSON.parse(r.stdout).summary).toMatchObject({ total: 2, ok: 2 });
+    expect(JSON.parse(r.stdout).summary).toMatchObject({ total: 2, success: 2 });
   });
 });
 
@@ -155,7 +177,7 @@ describe('run through the real binary', () => {
 
     const failFast = await runBin(['run', '--all', '--json', '--config', p.config]);
     expect(failFast.code).toBe(1);
-    expect(JSON.parse(failFast.stdout).tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'failed', 'not-started']);
+    expect(JSON.parse(failFast.stdout).tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'failed', 'notStarted']);
 
     const cont = await runBin(['run', '--all', '--json', '--continue-on-error', '--config', p.config]);
     expect(cont.code).toBe(1);
@@ -417,7 +439,7 @@ describe('in-process runCli (success paths, formatting and exit codes)', () => {
     expect(r.stderr).toContain('Received SIGTERM');
     const report = JSON.parse(r.stdout);
     expect(report.interrupted).toBe(true);
-    expect(report.tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'not-started', 'not-started']);
+    expect(report.tenants.map((t: { status: string }) => t.status)).toEqual(['success', 'notStarted', 'notStarted']);
     expect(process.listenerCount('SIGTERM')).toBe(before); // handlers are removed once the run is over
     expect(await advisoryLocksHeld(db)).toEqual([]);
   });

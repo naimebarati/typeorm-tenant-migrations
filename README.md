@@ -119,7 +119,9 @@ if (report.summary.failed || report.summary.locked || report.summary.notStarted)
 
 * The constructor validates the whole configuration synchronously and throws `TenantMigrationError` (`INVALID_CONFIGURATION`, …) before any connection is opened.
 * `run()` throws only for configuration/selection problems (bad tenant list, unknown id, unsafe schema name). Everything that happens *per tenant* is returned in the report; nothing per-tenant is thrown.
-* `plan()` and `status()` return `{ startedAt, finishedAt, summary, tenants }`.
+* `plan()` and `status()` return `{ startedAt, finishedAt, summary, tenants }`. Each tenant has `status: 'success' | 'failed'` (could it be inspected), the summary is `{ total, success, failed, pendingTotal }`. The words are the same as in the report of `run()`, whose statuses and summary keys are `success`, `failed`, `locked`, `skipped`, `notStarted`.
+* The config object takes exactly `dataSource`, `tenants` and, optionally, `options`. Any other key is an `INVALID_CONFIGURATION` (a misspelled `option:` must not silently run with the defaults); the same holds for the config file of the CLI.
+* A `TenantMigrationError` has a sanitized `message` and, as `cause`, the original error. Report and log `message`, never `cause`: the original error can carry driver details, and the tool does not redact it.
 * `revert()` returns the same envelope as `run()` with one tenant, and each tenant result has an extra `reverted: string[]`. It throws for the same kinds of problems as `run()`, plus `tenant` / `migration` that are not a tenant id / a migration name.
 
 ### NestJS
@@ -148,7 +150,7 @@ CLI flags override `options` from the config file. Relative migration globs are 
 
 ### Module formats
 
-* **Config files.** `.js` / `.cjs` / `.mjs` (including top-level `await`) and `.ts`. TypeScript configs are imported with [`tsx`](https://tsx.is)'s `tsImport` when `tsx` can be resolved from the working directory (tested with tsx 4.x, including syntax Node cannot strip, such as `enum`). Without `tsx`, Node's own type stripping loads configs that use only erasable type syntax (Node 22.18+ / 24+; verified on 22.22); anything else fails with `INVALID_CONFIGURATION` and a message telling you to install `tsx` or point `--config` at a compiled `.js` file.
+* **Config files.** `.js` / `.cjs` / `.mjs` (including top-level `await`) and `.ts` (`.mts` and `.cts` are accepted too and treated like `.ts`). An ES module may also export `dataSource`, `tenants` and `options` as named exports instead of a default export. TypeScript configs are imported with [`tsx`](https://tsx.is)'s `tsImport` when `tsx` can be resolved from the working directory (tested with tsx 4.x, including syntax Node cannot strip, such as `enum`). Without `tsx`, Node's own type stripping loads configs that use only erasable type syntax (Node 22.18+ / 24+; verified on 22.22); anything else fails with `INVALID_CONFIGURATION` and a message telling you to install `tsx` or point `--config` at a compiled `.js` file.
 * **Migration files** are *not* loaded by this tool: TypeORM imports them through Node itself, so what Node can load is what works. Tested through the real binary: CommonJS `.js`, ES modules `.mjs` (default export, one class per file; and several named exports in one file), and TypeScript migrations that Node can strip (plain type annotations, Node 22.18+ / 24+). **TypeScript that needs a transform (`enum`, decorators, …) is not loaded, even if `tsx` is installed**; compile your migrations to JavaScript (the usual production setup) and point `migrations` at the output. When loading fails, the per-tenant error says so (`DATASOURCE_INITIALIZATION_FAILED` with a hint), e.g. a CommonJS migration inside a `"type": "module"` project.
 * Migration globs are resolved by TypeORM against the current working directory; use absolute paths to be independent of it. On Windows write globs with forward slashes (`path.join(...).split(path.sep).join('/')`): a backslash is a glob escape character.
 
@@ -225,7 +227,7 @@ Summary: 4 tenant(s) — 4 pending migration(s) in total, 1 tenant(s) could not 
 }
 ```
 
-Tenant statuses: `success` (migrations ran), `skipped` (nothing pending), `failed`, `locked` (lock not obtained in time), `not-started` (never scheduled because an earlier tenant failed). `executed` is computed from the tenant's history table before vs. after — what actually committed — not from timing or from what was attempted. If the history cannot be read back after a failure (for example the database disappeared), `executedKnown` is `false` and `executed` is empty rather than guessed.
+Tenant statuses: `success` (migrations ran), `skipped` (nothing pending), `failed`, `locked` (lock not obtained in time), `notStarted` (never scheduled because an earlier tenant failed). `executed` is computed from the tenant's history table before vs. after — what actually committed — not from timing or from what was attempted. If the history cannot be read back after a failure (for example the database disappeared), `executedKnown` is `false` and `executed` is empty rather than guessed.
 
 ## Options
 
@@ -239,7 +241,7 @@ Tenant statuses: `success` (migrations ran), `skipped` (nothing pending), `faile
 | `migrationsTableName` | base option, else `"migrations"` | Plain identifier only (`^[A-Za-z_][A-Za-z0-9_]{0,62}$`). |
 | `searchPathMode` | `'tenant-only'` | `'tenant-first'` appends `fallbackSchemas`. |
 | `fallbackSchemas` | none | Only with `'tenant-first'`. |
-| `logger` | silent | `{ info, warn, error, debug? }`. The CLI uses a stderr logger. |
+| `logger` | silent | `{ info, warn, error }`. The CLI uses a stderr logger. |
 
 Unknown option names are rejected (a typo like `concurency` must not silently fall back to the default).
 
@@ -295,13 +297,13 @@ Tested in `test/integration/runner-revert.test.ts` and `cli.test.ts` against rea
 
 ## Interruption
 
-* **Programmatic:** `runner.run({ target, signal })` (and `runner.revert({ …, signal })`) takes an `AbortSignal`. When it aborts, no further tenant is started (they are reported `not-started`), a tenant that is only *waiting* for its lock gives up at once, and tenants already migrating **run to completion** — a migration is never cancelled midway. The report then has `interrupted: true` and is never "clean".
+* **Programmatic:** `runner.run({ target, signal })` (and `runner.revert({ …, signal })`) takes an `AbortSignal`. When it aborts, no further tenant is started (they are reported `notStarted`), a tenant that is only *waiting* for its lock gives up at once, and tenants already migrating **run to completion** — a migration is never cancelled midway. The report then has `interrupted: true` and is never "clean".
 * **CLI:** the first `SIGINT`/`SIGTERM` during `run` does exactly that, prints the report and exits `130`. A second signal terminates the process immediately; if a transaction was open, PostgreSQL rolls it back when it notices the client is gone. `SIGKILL` (cannot be handled) behaves like that second signal.
 * Tested with real signals sent to the real binary in the middle of a migration: after `SIGKILL` or a double `SIGINT`, the transaction is rolled back, the lock and the sessions are gone, and the same command completes on the next run. A migration that is not transactional (`transaction: 'none'`, `CREATE INDEX CONCURRENTLY`, …) gets no rollback in any of these cases; that is the reason the first signal waits instead of killing.
 
 ## Failure behavior
 
-* **Preflight.** Before the first change, `run` inspects *every* selected tenant read-only: schema exists, `search_path` is right, migrations load. If any tenant fails that, nothing is migrated (default) and the rest are reported `not-started`. With `continueOnError`, healthy tenants still run and the broken one is reported `failed`. A DataSource that loads **zero** migrations is a failure (a mistyped glob must not look like success).
+* **Preflight.** Before the first change, `run` inspects *every* selected tenant read-only: schema exists, `search_path` is right, migrations load. If any tenant fails that, nothing is migrated (default) and the rest are reported `notStarted`. With `continueOnError`, healthy tenants still run and the broken one is reported `failed`. A DataSource that loads **zero** migrations is a failure (a mistyped glob must not look like success).
 * **Lock.** Per tenant: acquire → re-read history *under the lock* → run → release. Not acquired within `lockTimeoutMs` → status `locked` (`CONCURRENT_MIGRATION`), migration not run.
 * **During the run.** Default `continueOnError: false`: after the first `failed`/`locked` tenant no *new* tenant is started. Tenants already in flight (with `concurrency > 1`) cannot be cancelled mid-migration and are reported with their real outcome.
 * **No automatic retry, no automatic rollback.** Reverting is a separate, explicit command for one tenant ([Reverting a migration](#reverting-a-migration)); a failed `run` never reverts anything.

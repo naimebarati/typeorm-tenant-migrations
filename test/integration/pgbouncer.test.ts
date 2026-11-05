@@ -102,7 +102,7 @@ describe.skipIf(!bin)('tenant migrations through PgBouncer', () => {
       const report = await runner.run({ target: ALL });
       if (measuredPooler) {
         expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'SCHEMA_CONTEXT_MISMATCH' } });
-        expect(report.tenants[1]!.status).toBe('not-started');
+        expect(report.tenants[1]!.status).toBe('notStarted');
 
         const plan = await runner.plan({ target: ALL });
         expect(plan.tenants.every((t) => t.status === 'failed' && t.error?.code === 'SCHEMA_CONTEXT_MISMATCH')).toBe(true);

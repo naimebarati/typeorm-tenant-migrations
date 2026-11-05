@@ -14,13 +14,13 @@ const result = (status: TenantMigrationResult['status']): TenantMigrationResult 
 
 describe('summarize', () => {
   it('counts every status', () => {
-    const s = summarize(['success', 'success', 'failed', 'locked', 'skipped', 'not-started', 'not-started'].map((x) => result(x as never)));
+    const s = summarize(['success', 'success', 'failed', 'locked', 'skipped', 'notStarted', 'notStarted'].map((x) => result(x as never)));
     expect(s).toEqual({ total: 7, success: 2, failed: 1, locked: 1, skipped: 1, notStarted: 2 });
   });
 
   it('treats up-to-date (skipped) tenants as clean, anything unfinished as not clean', () => {
     expect(isCleanReport({ summary: summarize([result('success'), result('skipped')]) })).toBe(true);
-    for (const bad of ['failed', 'locked', 'not-started'] as const) {
+    for (const bad of ['failed', 'locked', 'notStarted'] as const) {
       expect(isCleanReport({ summary: summarize([result('success'), result(bad)]) })).toBe(false);
     }
   });

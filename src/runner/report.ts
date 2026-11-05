@@ -1,6 +1,6 @@
 import type { TenantMigrationErrorCode } from '../errors/index.js';
 
-export type TenantRunStatus = 'success' | 'failed' | 'locked' | 'skipped' | 'not-started';
+export type TenantRunStatus = 'success' | 'failed' | 'locked' | 'skipped' | 'notStarted';
 
 export interface TenantMigrationResult {
   tenantId: string;
@@ -45,7 +45,7 @@ export interface TenantMigrationRunReport {
   startedAt: string;
   finishedAt: string;
   summary: TenantMigrationRunSummary;
-  /** Present (true) only when the run was stopped through its AbortSignal: tenants not yet started are `not-started`. */
+  /** Present (true) only when the run was stopped through its AbortSignal: tenants not yet started are `notStarted`. */
   interrupted?: true;
   tenants: TenantMigrationResult[];
 }
@@ -63,7 +63,7 @@ export function summarize(results: readonly TenantMigrationResult[]): TenantMigr
       case 'failed': summary.failed++; break;
       case 'locked': summary.locked++; break;
       case 'skipped': summary.skipped++; break;
-      case 'not-started': summary.notStarted++; break;
+      case 'notStarted': summary.notStarted++; break;
     }
   }
   return summary;

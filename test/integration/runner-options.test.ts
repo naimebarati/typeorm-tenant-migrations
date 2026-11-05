@@ -88,7 +88,7 @@ describe("searchPathMode 'tenant-first' (the documented hazard, proven)", () => 
 
   it("'tenant-first' plan/status work and use the same path", async () => {
     const runner = makeRunner({ db, migrations: [CreateHere], tenants: [GAMMA], options: { searchPathMode: 'tenant-first', fallbackSchemas: ['public'] } });
-    expect((await runner.plan({ target: gamma })).tenants[0]).toMatchObject({ status: 'ok', pending: ['CreateHere1700000000071'] });
+    expect((await runner.plan({ target: gamma })).tenants[0]).toMatchObject({ status: 'success', pending: ['CreateHere1700000000071'] });
   });
 });
 
@@ -118,7 +118,7 @@ describe('user startup options are merged, not replaced', () => {
   it('plan/status keep the user options as well as read-only', async () => {
     const base = { extra: { options: '-c statement_timeout=450' } };
     const status = await makeRunner({ db, migrations: [Probe], base }).status({ target: one });
-    expect(status.tenants[0]!.status).toBe('ok');
+    expect(status.tenants[0]!.status).toBe('success');
   });
 });
 
@@ -159,7 +159,7 @@ describe('concurrency > 1 with a failure', () => {
     expect(report.tenants.map((t) => [t.tenantId, t.status])).toEqual([
       ['alpha', 'success'],
       ['beta', 'failed'],
-      ['gamma', 'not-started'],
+      ['gamma', 'notStarted'],
     ]);
     expect(await finished('tenant_alpha')).toBe(1); // alpha was not cancelled mid-migration
     expect(await finished('tenant_gamma')).toBe(0);

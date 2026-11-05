@@ -90,7 +90,7 @@ describe('two runners racing for the same tenant', () => {
     await waitFor(async () => (await advisoryLocksHeld(db)).length > 0);
     const report = await blocked.run({ target: ALL });
     await running;
-    expect(report.tenants.map((t) => t.status)).toEqual(['locked', 'not-started']);
+    expect(report.tenants.map((t) => t.status)).toEqual(['locked', 'notStarted']);
   });
 });
 

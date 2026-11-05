@@ -80,12 +80,12 @@ describe('failure across tenants', () => {
   });
   const auditCount = async (schema: string) => Number((await db.client.query(`SELECT count(*) FROM "${schema}".audit`)).rows[0].count);
 
-  it('fail-fast (default): stops scheduling after the first failure, reports the rest as not-started', async () => {
+  it('fail-fast (default): stops scheduling after the first failure, reports the rest as notStarted', async () => {
     const report = await makeRunner({ db, migrations: [FlakyOnBeta], tenants: [ALPHA, BETA, GAMMA] }).run({ target: ALL });
     expect(report.tenants.map((t) => [t.tenantId, t.status])).toEqual([
       ['alpha', 'success'],
       ['beta', 'failed'],
-      ['gamma', 'not-started'],
+      ['gamma', 'notStarted'],
     ]);
     expect(report.summary).toEqual({ total: 3, success: 1, failed: 1, locked: 0, skipped: 0, notStarted: 1 });
     expect(await tablesOf(db.client, 'tenant_gamma')).toEqual(['audit', 'orders']); // untouched
@@ -156,7 +156,7 @@ describe('fail-closed on search_path', () => {
       const report = await runner.run({ target: ALL });
 
       expect(report.tenants[0]).toMatchObject({ status: 'failed', error: { code: 'SCHEMA_CONTEXT_MISMATCH' } });
-      expect(report.tenants[1]!.status).toBe('not-started');
+      expect(report.tenants[1]!.status).toBe('notStarted');
       expect((await db.client.query('SELECT count(*) FROM public.orders')).rows[0].count).toBe('0');
       expect(await tablesOf(db.client, 'tenant_alpha')).toEqual(['audit', 'orders']);
       expect(await tablesOf(db.client, 'public')).toEqual(['orders']);
