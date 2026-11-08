@@ -1,0 +1,60 @@
+name: Old PostgreSQL probe
+
+# Diagnostic, run by hand (Actions > Old PostgreSQL probe > Run workflow). It does not change what is supported: the README says that
+# PostgreSQL below 12 is "not tested and not supported", and this workflow only finds out what the suite does there, so that the
+# README can say what was seen instead of guessing. Each job runs the whole test suite against one old PostgreSQL major and prints a
+# RESULT line and every failed test. A job is red when something failed; that is the answer, not a problem with the workflow.
+#
+# PgBouncer is not installed here, so its 8 tests are skipped; and the server has no TLS, so the 5 TLS tests are skipped.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: postgres ${{ matrix.postgres }}, typeorm ${{ matrix.typeorm }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['9.6', '10', '11']
+        typeorm: ['0.3', '1']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TTM_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Select TypeORM / pg versions under test
+        run: |
+          npm install --no-save --no-audit --no-fund "typeorm@${{ matrix.typeorm }}" "pg@8"
+          node scripts/assert-versions.mjs typeorm "${{ matrix.typeorm }}" pg "8"
+      - name: Which server is this
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -tAc "select version()"
+      - name: Whole suite
+        run: |
+          set +e
+          npx vitest run --reporter=default --reporter=json --outputFile.json=probe-report.json
+          code=$?
+          set -e
+          echo "vitest exit code: $code"
+          if [ -f probe-report.json ]; then node scripts/summarize-test-run.mjs probe-report.json; else echo "RESULT no report was written"; fi
+          exit $code
