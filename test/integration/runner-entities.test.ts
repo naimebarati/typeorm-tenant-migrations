@@ -55,8 +55,10 @@ const CreateOrders = defineMigration('CreateOrders1700000000130', async (q: Quer
 });
 
 const withEntities = (extra: Record<string, unknown> = {}) => ({ entities: [Order, OrderTotals, EntityOnly], ...extra });
+// COLLATE "C": the order must not depend on the server's locale. "order_totals" sorts before or after "orders" depending on the glibc of the
+// image (the old postgres:9.6 to :11 images disagree with the current ones), which the old-postgres-probe run showed.
 const relations = async (schema: string) =>
-  (await db.client.query(`SELECT table_name || ':' || table_type AS r FROM information_schema.tables WHERE table_schema = $1 ORDER BY 1`, [schema])).rows.map((r) => r.r as string);
+  (await db.client.query(`SELECT table_name || ':' || table_type AS r FROM information_schema.tables WHERE table_schema = $1 ORDER BY (table_name || ':' || table_type) COLLATE "C"`, [schema])).rows.map((r) => r.r as string);
 
 describe('a DataSource config that has entities (views, generated columns, uuid generation)', () => {
   it('plan and status are still read-only', async () => {
