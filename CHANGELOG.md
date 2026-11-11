@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+* CI: `old-postgres-probe.yml`, a manual workflow that runs the whole suite on PostgreSQL 9.6, 10 and 11 (TypeORM 0.3 and 1). Its third run passed 363 tests and skipped 13 on all six jobs; PostgreSQL below 12 stays unsupported, and the README now says what was and was not observed (`README.md`, "Old PostgreSQL, probed once"). No change to the package's code. Two test fixtures were fixed on the way (a stored generated column that needs PostgreSQL 12, and a locale-dependent sort order).
+
 ## 0.1.0-alpha.4
 
 This release changes the package's code and, while the API is still an alpha, several names. **Read the "Breaking" items before upgrading from `0.1.0-alpha.3`:** a program that reads the `--json` output or the report objects, or that passes a config with extra keys, needs a change. What to change: `status === 'not-started'` → `'notStarted'`; for `plan()`/`status()` results `status === 'ok'` → `'success'` and `summary.ok` → `summary.success`; remove any config key other than `dataSource`, `tenants`, `options`; do not use `runner.resolvedOptions` or a `debug` logger method (never called).

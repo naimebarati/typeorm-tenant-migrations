@@ -368,7 +368,7 @@ TLS tests need a server with `ssl = on` (Debian/Ubuntu packages have it; stock d
 * Pending migrations are determined with TypeORM's rule — by **name**, not by timestamp order — so a migration with an older timestamp than the newest executed one still runs. `plan`'s independent implementation of that rule is checked against what `run` really executes in the tests, on every TypeORM version in the matrix.
 * TypeORM loads entity and migration files when each tenant DataSource is initialized, so they are loaded once per tenant per phase (preflight + run); keep `entities` small in the config you use for migrations. Entities in the config are fine: with entities that include views, generated columns or uuid generation, `plan`/`status` stay read-only, `synchronize` / `dropSchema` / `installExtensions` from your config are overridden (no entity-only table is created, no extension installed), and TypeORM's own bookkeeping table `typeorm_metadata` is created **inside each tenant schema** (never in `public`) when `run` executes against such entities. All tested.
 * `executedKnown: false` (history unreadable after failure) is exercised by a test that cuts the database connection mid-migration.
-* PostgreSQL below 12 is not tested and not supported.
+* **PostgreSQL below 12 is not supported** (end of life, and not part of the regular CI). It was run once, by hand, to see what happens: the whole suite passed on 9.6, 10 and 11, with 13 tests skipped for lack of PgBouncer and TLS there (see [Old PostgreSQL, probed once](#old-postgresql-probed-once)). That is an observation, not a promise.
 * Only the first-party read-only/locking guarantees listed here are tested. Anything not listed (other drivers, replication, pgBouncer transaction mode, Windows paths, …) is untested.
 
 ## Compatibility
@@ -421,7 +421,24 @@ The run found and fixed Windows problems that Linux could not show: `tsImport` n
 | 0.3.31 | 8.5.1 | 16.15 | 22.22 | 376 / 376 pass |
 | 0.3.31 | 8.11.5 | 16.15 | 22.22 | 376 / 376 pass |
 
-`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered: PostgreSQL below 12; Node 20 and 24 on macOS and Windows (they run only on Linux x64); macOS on Intel, Windows on ARM; PgBouncer on Windows; connection poolers other than PgBouncer, and PgBouncer versions other than 1.22.0, 1.25.1 and 1.26.1; graceful interruption by signal on Windows.
+`pg` 8.0.x fails on current Node versions (even test fixtures), hence the `>=8.5.1` lower bound. Versions between the tested points are expected to behave the same but were not run. Not covered by the regular CI: PostgreSQL below 12 (a one-off manual run is described [below](#old-postgresql-probed-once)); Node 20 and 24 on macOS and Windows (they run only on Linux x64); macOS on Intel, Windows on ARM; PgBouncer on Windows; connection poolers other than PgBouncer, and PgBouncer versions other than 1.22.0, 1.25.1 and 1.26.1; graceful interruption by signal on Windows.
+
+### Old PostgreSQL, probed once
+
+Not supported, and not part of the CI that runs on every push. A manual workflow (`old-postgres-probe.yml`, *Actions > Old PostgreSQL probe*) runs the whole suite against the `postgres:9.6`, `:10` and `:11` images; its third run (CI run 43028612704, at commit `c745190`) gave, read from the job logs:
+
+| PostgreSQL | TypeORM | pg | Node | Result |
+| --- | --- | --- | --- | --- |
+| 9.6.24 | 0.3.31 and 1.1.2 | 8.23.1 | 22 | 363 passed, 0 failed, 13 skipped |
+| 10.21 | 0.3.31 and 1.1.2 | 8.23.1 | 22 | 363 passed, 0 failed, 13 skipped |
+| 11.16 | 0.3.31 and 1.1.2 | 8.23.1 | 22 | 363 passed, 0 failed, 13 skipped |
+
+What this does and does not say:
+
+* The 13 skipped tests are the ones that need something these jobs do not have: PgBouncer (not installed) and TLS (the server has none). So **PgBouncer and TLS were not exercised on these versions.** (That the 13 are exactly those two groups is how the count adds up, 8 + 5; the names of the skipped tests were not read from the log.)
+* Every SQL statement and function the package itself issues (advisory locks, `current_setting`, `current_schema()`, the history-table lookup, the connection budget) exists in these versions, and the suite agrees. That is all that was observed; no claim is made for anything else on these versions.
+* Two things only the old servers could show were in the tests, not in the package: a fixture that used a stored generated column (PostgreSQL 12+), and an ordering assertion that depended on the server's locale. Both were fixed in the tests. Below 12 the entities test creates a plain column where the entity declares a generated one, so the generated-column case itself is only run from 12 on.
+* A first run of the probe (CI run 42502181800) had failed 3 tests for the first of those reasons, a second one (43027858279) 1 test for the second; the table above is the third run.
 
 ## Performance and limits
 
