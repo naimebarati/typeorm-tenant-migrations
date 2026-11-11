@@ -45,7 +45,12 @@ const OrderTotals = new EntitySchema({
 const EntityOnly = new EntitySchema({ name: 'EntityOnly', tableName: 'entity_only', columns: { id: { type: Number, primary: true } } });
 
 const CreateOrders = defineMigration('CreateOrders1700000000130', async (q: QueryRunner) => {
-  await q.query('CREATE TABLE "orders" (id serial PRIMARY KEY, ref uuid, total numeric, double numeric GENERATED ALWAYS AS (total * 2) STORED)');
+  // Stored generated columns exist from PostgreSQL 12. Below that (not supported; only the manual old-postgres-probe workflow runs there)
+  // the table gets a plain column instead, so that the rest of this file can still say something about those servers. The entity above
+  // declares the column as generated either way: that is metadata, nothing here creates the table from it.
+  const rows = (await q.query('SHOW server_version_num')) as Array<{ server_version_num: string }>;
+  const double = Number(rows[0]!.server_version_num) >= 120000 ? 'double numeric GENERATED ALWAYS AS (total * 2) STORED' : 'double numeric';
+  await q.query(`CREATE TABLE "orders" (id serial PRIMARY KEY, ref uuid, total numeric, ${double})`);
   await q.query('CREATE VIEW "order_totals" AS SELECT id, total FROM orders');
 });
 
@@ -70,6 +75,11 @@ describe('a DataSource config that has entities (views, generated columns, uuid 
       expect(await relations(schema)).toEqual(['audit:BASE TABLE', 'migrations:BASE TABLE', 'order_totals:VIEW', 'orders:BASE TABLE', 'typeorm_metadata:BASE TABLE']);
     }
     expect(await relations('public')).toEqual([]);
+
+    // The version switch in CreateOrders must not turn into "never a generated column": from PostgreSQL 12 the column really is one.
+    const version = Number((await db.client.query('SHOW server_version_num')).rows[0].server_version_num);
+    const generated = (await db.client.query(`SELECT is_generated FROM information_schema.columns WHERE table_schema = 'tenant_alpha' AND table_name = 'orders' AND column_name = 'double'`)).rows[0]?.is_generated;
+    expect(generated).toBe(version >= 120000 ? 'ALWAYS' : 'NEVER');
   });
 
   it('a second run is a no-op', async () => {
