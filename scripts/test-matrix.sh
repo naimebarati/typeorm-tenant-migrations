@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 
 VERSIONS=("$@")
 if [ ${#VERSIONS[@]} -eq 0 ]; then
-  VERSIONS=(0.3.20 0.3.31 1.0.0 1.1.2)
+  VERSIONS=(0.3.20 0.3.31 1.0.0 1.1.2 1.1.3)
 fi
 
 status=0

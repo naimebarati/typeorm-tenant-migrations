@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* TypeORM 1.1.3 (what `typeorm@1` resolved to in CI run 49; run 47 still had 1.1.2): the whole suite passes on it, locally (376 / 376) and in that CI run. README, `scripts/test-matrix.sh` and CONTRIBUTING list it. No change to the package's code or to the supported range (`>=1.0.0 <2.0.0`).
+
 * CI: the macOS and Windows jobs also run Node 20 and 24 (with PostgreSQL 16), four more jobs; 27 in total. First run (CI run 48): all green, 376 / 376 on macOS and 365 passed / 11 skipped on Windows, for both Node lines. No change to the package's code.
 
 * CI: `old-postgres-probe.yml`, a manual workflow that runs the whole suite on PostgreSQL 9.6, 10 and 11 (TypeORM 0.3 and 1). Its third run passed 363 tests and skipped 13 on all six jobs; PostgreSQL below 12 stays unsupported, and the README now says what was and was not observed (`README.md`, "Old PostgreSQL, probed once"). No change to the package's code. Two test fixtures were fixed on the way (a stored generated column that needs PostgreSQL 12, and a locale-dependent sort order).
